@@ -1,0 +1,7 @@
+ao-cliente/
+ao-server/
+ao-recursos/
+.DS_Store
+node_modules/
+.env
+.env.local
