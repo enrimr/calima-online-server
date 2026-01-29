@@ -1,5 +1,6 @@
 import Character from '../models/Character.js';
 import User from '../models/User.js';
+import { GAME_CONFIG } from '../config/gameConfig.js';
 
 // @desc    Obtener todos los personajes del usuario
 // @route   GET /api/characters
@@ -69,12 +70,14 @@ export const createCharacter = async (req, res) => {
       });
     }
 
-    // Verificar límite de personajes por cuenta (máximo 3)
+    // Verificar límite de personajes por cuenta usando configuración
     const characterCount = await Character.countDocuments({ userId: req.user.userId });
-    if (characterCount >= 3) {
+    const maxCharacters = GAME_CONFIG.characters.maxPerUser;
+    
+    if (characterCount >= maxCharacters) {
       return res.status(400).json({
         success: false,
-        message: 'Has alcanzado el límite de 3 personajes por cuenta'
+        message: `Has alcanzado el límite de ${maxCharacters} personajes por cuenta`
       });
     }
 
@@ -173,12 +176,17 @@ export const createCharacter = async (req, res) => {
 
     const stats = classStats[charClass] || classStats.guerrero;
 
-    // Crear personaje
+    // Crear personaje con posición inicial desde configuración
     const character = await Character.create({
       userId: req.user.userId,
       name,
       class: charClass,
       appearance: appearance || {},
+      position: {
+        map: GAME_CONFIG.spawn.defaultMap,
+        x: GAME_CONFIG.spawn.defaultX,
+        y: GAME_CONFIG.spawn.defaultY
+      },
       stats: {
         ...stats,
         hp: stats.maxHp,
@@ -187,18 +195,22 @@ export const createCharacter = async (req, res) => {
         maxStamina: 100,
         level: 1,
         experience: 0,
-        gold: 100,
+        gold: GAME_CONFIG.stats.initialGold,
         defense: 0,
         magicDefense: 0,
         evasion: 0,
         accuracy: 50
       },
-      // Inventario inicial con algunas pociones
-      inventory: [
-        { slot: 1, itemId: 'potion_health_minor', quantity: 5 },
-        { slot: 2, itemId: 'potion_mana_minor', quantity: 3 }
-      ]
+      // Inventario inicial desde configuración
+      inventory: GAME_CONFIG.inventory.initialItems.map((item, index) => ({
+        slot: index + 1,
+        itemId: item.itemId,
+        quantity: item.quantity
+      }))
     });
+
+    console.log(`✅ Personaje creado: ${character.name} (${charClass}) en ${character.position.map} (${character.position.x}, ${character.position.y})`);
+    console.log(`   Apariencia:`, character.appearance);
 
     res.status(201).json({
       success: true,
@@ -385,6 +397,29 @@ export const disconnectCharacter = async (req, res) => {
     }
 
     await character.save();
+
+    // IMPORTANTE: Forzar desconexión si el personaje está conectado en otra sesión
+    const { io, characterSockets } = await import('../server.js');
+    const socketId = characterSockets.get(character._id.toString());
+    
+    if (socketId) {
+      console.log(`🔌 Forzando desconexión del personaje ${character.name} (socketId: ${socketId})`);
+      
+      // Enviar evento de desconexión forzada al cliente
+      io.to(socketId).emit('force_disconnect', {
+        message: 'Has sido desconectado del juego',
+        reason: 'disconnect_from_lobby'
+      });
+      
+      // Desconectar el socket
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.disconnect(true);
+      }
+      
+      // Limpiar del mapeo
+      characterSockets.delete(character._id.toString());
+    }
 
     res.json({
       success: true,

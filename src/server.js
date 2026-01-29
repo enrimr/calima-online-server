@@ -6,6 +6,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import connectDB from './config/database.js';
+import { GAME_CONFIG, validateConfig } from './config/gameConfig.js';
 import authRoutes from './routes/authRoutes.js';
 import characterRoutes from './routes/characterRoutes.js';
 import Character from './models/Character.js';
@@ -13,6 +14,9 @@ import jwt from 'jsonwebtoken';
 
 // Cargar variables de entorno
 dotenv.config();
+
+// Validar configuración del juego
+validateConfig();
 
 // Conectar a la base de datos
 connectDB();
@@ -108,9 +112,10 @@ app.use((err, req, res, next) => {
 
 // Almacenar jugadores conectados
 const connectedPlayers = new Map(); // socketId -> { userId, characterId, username, position, map }
+const characterSockets = new Map(); // characterId -> socketId (para desconexión forzada)
 
-// Timer para guardado automático periódico (cada 30 segundos)
-const AUTOSAVE_INTERVAL = 30000; // 30 segundos
+// Timer para guardado automático periódico (configurado en gameConfig.js)
+const AUTOSAVE_INTERVAL = GAME_CONFIG.autosave.interval;
 setInterval(async () => {
   console.log(`🔄 Guardado automático: ${connectedPlayers.size} jugadores online`);
   
@@ -177,7 +182,11 @@ io.on('connection', (socket) => {
         map: character.position.map || 'newbie_city'
       };
 
-      // Guardar información del jugador conectado con apariencia y equipamiento
+      // Mapear race de número a string para el cliente
+      const raceMap = { 1: 'human', 2: 'dwarf', 3: 'creature' };
+      const raceString = character.appearance?.race ? raceMap[character.appearance.race] : 'human';
+
+      // Guardar información del jugador conectado con apariencia, equipamiento, stats y estado
       const playerData = {
         userId: socket.userId,
         characterId: character._id.toString(),
@@ -188,10 +197,21 @@ io.on('connection', (socket) => {
         level: character.stats.level,
         appearance: character.appearance,
         equipment: character.equipment,
-        race: character.race || 'human'
+        race: raceString,
+        // Stats para mostrar vida
+        hp: character.stats.hp || 0,
+        maxHp: character.stats.maxHp || 100,
+        // Estado (vivo/muerto/fantasma)
+        isAlive: character.state.isAlive !== false,
+        isGhost: character.stats.hp === 0 || character.state.isAlive === false,
+        // Facción
+        faction: character.faction || 'ciudadano'
       };
 
       connectedPlayers.set(socket.id, playerData);
+      
+      // Registrar mapeo characterId -> socketId para desconexión forzada
+      characterSockets.set(character._id.toString(), socket.id);
 
       // Unirse a la sala del mapa
       socket.join(playerData.map);
@@ -206,7 +226,7 @@ io.on('connection', (socket) => {
         startPosition: savedPosition // Enviar posición inicial explícitamente
       });
 
-      // Notificar a otros jugadores en el mismo mapa
+      // Notificar a otros jugadores en el mismo mapa con información completa
       socket.to(playerData.map).emit('player_joined', {
         socketId: socket.id,
         username: playerData.username,
@@ -215,7 +235,12 @@ io.on('connection', (socket) => {
         level: playerData.level,
         appearance: playerData.appearance,
         equipment: playerData.equipment,
-        race: playerData.race
+        race: playerData.race,
+        hp: playerData.hp,
+        maxHp: playerData.maxHp,
+        isAlive: playerData.isAlive,
+        isGhost: playerData.isGhost,
+        faction: playerData.faction
       });
     } catch (error) {
       console.error('Error en join_game:', error);
@@ -233,23 +258,40 @@ io.on('connection', (socket) => {
 
       // Si cambió de mapa
       if (map && map !== player.map) {
-        socket.leave(player.map);
+        const oldMap = player.map;
+        
+        socket.leave(oldMap);
         socket.join(map);
         
         // Notificar salida del mapa anterior
-        socket.to(player.map).emit('player_left', { socketId: socket.id });
+        socket.to(oldMap).emit('player_left', { socketId: socket.id });
         
         player.map = map;
         
-        // Notificar entrada al nuevo mapa
+        // Notificar entrada al nuevo mapa con información completa
         socket.to(map).emit('player_joined', {
           socketId: socket.id,
           username: player.username,
           position: { x, y, map },
           class: player.class,
           level: player.level,
-          appearance: player.appearance
+          appearance: player.appearance,
+          equipment: player.equipment,
+          race: player.race,
+          hp: player.hp,
+          maxHp: player.maxHp,
+          isAlive: player.isAlive,
+          isGhost: player.isGhost,
+          faction: player.faction
         });
+
+        // IMPORTANTE: Enviar lista de jugadores en el nuevo mapa al jugador que cambió
+        socket.emit('map_changed', {
+          newMap: map,
+          playersInMap: getPlayersInMap(map, socket.id)
+        });
+        
+        console.log(`🗺️ ${player.username} cambió de ${oldMap} a ${map}, enviando lista de ${getPlayersInMap(map, socket.id).length} jugadores`);
       }
 
       // Actualizar posición
@@ -289,6 +331,15 @@ io.on('connection', (socket) => {
       // Actualizar estado (isAlive, isMeditating, etc.)
       if (data.state) {
         Object.assign(character.state, data.state);
+      }
+
+      // IMPORTANTE: Asegurar consistencia entre HP y estado isAlive
+      if (character.stats.hp <= 0) {
+        character.stats.hp = 0;
+        character.state.isAlive = false;
+      } else if (character.stats.hp > 0 && !character.state.isAlive) {
+        // Si tiene HP pero isAlive es false, significa que fue resucitado
+        character.state.isAlive = true;
       }
 
       // Actualizar inventario completo
@@ -384,8 +435,9 @@ io.on('connection', (socket) => {
         // Notificar a otros jugadores
         socket.to(player.map).emit('player_left', { socketId: socket.id });
 
-        // Eliminar de la lista de conectados
+        // Eliminar de la lista de conectados y del mapeo
         connectedPlayers.delete(socket.id);
+        characterSockets.delete(player.characterId);
       }
     } catch (error) {
       console.error('Error en disconnect:', error);
@@ -393,7 +445,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Función auxiliar para obtener jugadores en un mapa
+// Función auxiliar para obtener jugadores en un mapa con información completa
 function getPlayersInMap(mapName, excludeSocketId = null) {
   const players = [];
   for (const [socketId, player] of connectedPlayers) {
@@ -411,7 +463,12 @@ function getPlayersInMap(mapName, excludeSocketId = null) {
         level: player.level,
         appearance: player.appearance,
         equipment: player.equipment,
-        race: player.race
+        race: player.race,
+        hp: player.hp,
+        maxHp: player.maxHp,
+        isAlive: player.isAlive,
+        isGhost: player.isGhost,
+        faction: player.faction
       });
     }
   }
@@ -422,20 +479,27 @@ function getPlayersInMap(mapName, excludeSocketId = null) {
 
 const PORT = process.env.PORT || 3000;
 
-httpServer.listen(PORT, () => {
-  console.log('\n===========================================');
-  console.log(`🚀 Servidor Calima Online iniciado`);
-  console.log(`📡 Puerto: ${PORT}`);
-  console.log(`🌍 Modo: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 URL: http://localhost:${PORT}`);
-  console.log('===========================================\n');
-});
+// Solo iniciar el servidor si no estamos en Vercel (Vercel maneja el inicio)
+if (process.env.VERCEL !== '1') {
+  httpServer.listen(PORT, () => {
+    console.log('\n===========================================');
+    console.log(`🚀 Servidor Calima Online iniciado`);
+    console.log(`📡 Puerto: ${PORT}`);
+    console.log(`🌍 Modo: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 URL: http://localhost:${PORT}`);
+    console.log('===========================================\n');
+  });
 
-// Manejo de errores no capturados
-process.on('unhandledRejection', (err) => {
-  console.error('❌ Error no manejado:', err);
-  // Cerrar servidor gracefully
-  httpServer.close(() => process.exit(1));
-});
+  // Manejo de errores no capturados
+  process.on('unhandledRejection', (err) => {
+    console.error('❌ Error no manejado:', err);
+    // Cerrar servidor gracefully
+    httpServer.close(() => process.exit(1));
+  });
+}
 
-export { io, connectedPlayers };
+// Exportar para Vercel serverless (default export)
+export default app;
+
+// Exportar para uso interno
+export { io, connectedPlayers, characterSockets, httpServer };
