@@ -32,7 +32,10 @@ const characterSchema = new mongoose.Schema({
   appearance: {
     body: { type: Number, default: 1, min: 1, max: 10 },
     head: { type: Number, default: 1, min: 1, max: 50 },
-    heading: { type: Number, default: 3, min: 1, max: 4 } // Dirección que mira
+    heading: { type: Number, default: 3, min: 1, max: 4 }, // Dirección que mira
+    race: { type: Number, default: 1, min: 1, max: 3 }, // 1=humano, 2=enano, 3=criatura
+    hairColor: { type: Number, default: 1, min: 1, max: 9 },
+    hairStyle: { type: Number, default: 1, min: 1, max: 5 }
   },
   
   // Posición en el mundo

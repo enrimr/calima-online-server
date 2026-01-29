@@ -109,6 +109,26 @@ app.use((err, req, res, next) => {
 // Almacenar jugadores conectados
 const connectedPlayers = new Map(); // socketId -> { userId, characterId, username, position, map }
 
+// Timer para guardado automático periódico (cada 30 segundos)
+const AUTOSAVE_INTERVAL = 30000; // 30 segundos
+setInterval(async () => {
+  console.log(`🔄 Guardado automático: ${connectedPlayers.size} jugadores online`);
+  
+  for (const [socketId, playerData] of connectedPlayers) {
+    try {
+      // Guardar posición actualizada
+      await Character.findByIdAndUpdate(playerData.characterId, {
+        'position.x': playerData.position.x,
+        'position.y': playerData.position.y,
+        'position.map': playerData.map,
+        lastPlayed: new Date()
+      });
+    } catch (error) {
+      console.error(`Error en guardado automático para ${playerData.username}:`, error);
+    }
+  }
+}, AUTOSAVE_INTERVAL);
+
 // Middleware de autenticación para Socket.io
 io.use(async (socket, next) => {
   try {
@@ -150,16 +170,25 @@ io.on('connection', (socket) => {
       character.state.isOnline = true;
       await character.save();
 
-      // Guardar información del jugador conectado
+      // IMPORTANTE: Usar la posición guardada en la BD
+      const savedPosition = {
+        x: character.position.x || 50,
+        y: character.position.y || 50,
+        map: character.position.map || 'newbie_city'
+      };
+
+      // Guardar información del jugador conectado con apariencia y equipamiento
       const playerData = {
         userId: socket.userId,
         characterId: character._id.toString(),
         username: character.name,
-        position: character.position,
-        map: character.position.map,
+        position: savedPosition,
+        map: savedPosition.map,
         class: character.class,
         level: character.stats.level,
-        appearance: character.appearance
+        appearance: character.appearance,
+        equipment: character.equipment,
+        race: character.race || 'human'
       };
 
       connectedPlayers.set(socket.id, playerData);
@@ -167,23 +196,27 @@ io.on('connection', (socket) => {
       // Unirse a la sala del mapa
       socket.join(playerData.map);
 
+      console.log(`✅ ${playerData.username} se unió al mapa ${playerData.map} en posición (${savedPosition.x}, ${savedPosition.y})`);
+
       // Notificar al jugador que se unió exitosamente
+      // IMPORTANTE: Excluir el propio jugador de la lista
       socket.emit('game_joined', {
         characterData: character,
-        onlinePlayers: getPlayersInMap(playerData.map)
+        onlinePlayers: getPlayersInMap(playerData.map, socket.id),
+        startPosition: savedPosition // Enviar posición inicial explícitamente
       });
 
       // Notificar a otros jugadores en el mismo mapa
       socket.to(playerData.map).emit('player_joined', {
         socketId: socket.id,
         username: playerData.username,
-        position: playerData.position,
+        position: savedPosition,
         class: playerData.class,
         level: playerData.level,
-        appearance: playerData.appearance
+        appearance: playerData.appearance,
+        equipment: playerData.equipment,
+        race: playerData.race
       });
-
-      console.log(`✅ ${playerData.username} se unió al mapa ${playerData.map}`);
     } catch (error) {
       console.error('Error en join_game:', error);
       socket.emit('error', { message: 'Error al unirse al juego' });
@@ -239,7 +272,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Actualización de stats del jugador
+  // Actualización de stats del jugador (COMPLETA)
   socket.on('update_stats', async (data) => {
     try {
       const player = connectedPlayers.get(socket.id);
@@ -248,12 +281,17 @@ io.on('connection', (socket) => {
       const character = await Character.findById(player.characterId);
       if (!character) return;
 
-      // Actualizar stats
+      // Actualizar stats (HP, Mana, Stamina, Level, Experience, Gold, etc.)
       if (data.stats) {
         Object.assign(character.stats, data.stats);
       }
 
-      // Actualizar inventario
+      // Actualizar estado (isAlive, isMeditating, etc.)
+      if (data.state) {
+        Object.assign(character.state, data.state);
+      }
+
+      // Actualizar inventario completo
       if (data.inventory) {
         character.inventory = data.inventory;
       }
@@ -263,7 +301,27 @@ io.on('connection', (socket) => {
         Object.assign(character.equipment, data.equipment);
       }
 
+      // Actualizar hechizos
+      if (data.spells) {
+        character.spells = data.spells;
+      }
+
+      // Actualizar skills
+      if (data.skills) {
+        Object.assign(character.skills, data.skills);
+      }
+
+      // Actualizar posición si se proporciona
+      if (data.position) {
+        character.position = data.position;
+        // Actualizar también en connectedPlayers
+        player.position = data.position;
+        player.map = data.position.map;
+      }
+
       await character.save();
+
+      console.log(`💾 Estado guardado para ${player.username}: HP=${character.stats.hp}/${character.stats.maxHp}, Mana=${character.stats.mana}/${character.stats.maxMana}`);
 
       // Confirmar actualización
       socket.emit('stats_updated', { success: true });
@@ -303,19 +361,25 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Desconexión
+  // Desconexión (con guardado completo)
   socket.on('disconnect', async () => {
     try {
       const player = connectedPlayers.get(socket.id);
       
       if (player) {
-        console.log(`🔌 ${player.username} se desconectó`);
+        console.log(`🔌 ${player.username} se desconectó, guardando estado final...`);
 
-        // Marcar personaje como offline
+        // Marcar personaje como offline y guardar última posición
         await Character.findByIdAndUpdate(player.characterId, {
           'state.isOnline': false,
+          'state.isMeditating': false,
+          'position.x': player.position.x,
+          'position.y': player.position.y,
+          'position.map': player.map,
           lastPlayed: new Date()
         });
+
+        console.log(`💾 Estado final guardado para ${player.username} en ${player.map} (${player.position.x}, ${player.position.y})`);
 
         // Notificar a otros jugadores
         socket.to(player.map).emit('player_left', { socketId: socket.id });
@@ -330,9 +394,14 @@ io.on('connection', (socket) => {
 });
 
 // Función auxiliar para obtener jugadores en un mapa
-function getPlayersInMap(mapName) {
+function getPlayersInMap(mapName, excludeSocketId = null) {
   const players = [];
   for (const [socketId, player] of connectedPlayers) {
+    // Excluir el jugador especificado (típicamente el que está consultando)
+    if (socketId === excludeSocketId) {
+      continue;
+    }
+    
     if (player.map === mapName) {
       players.push({
         socketId,
@@ -340,7 +409,9 @@ function getPlayersInMap(mapName) {
         position: player.position,
         class: player.class,
         level: player.level,
-        appearance: player.appearance
+        appearance: player.appearance,
+        equipment: player.equipment,
+        race: player.race
       });
     }
   }
