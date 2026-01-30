@@ -157,8 +157,10 @@ io.on('connection', (socket) => {
 
   // Unirse al juego con un personaje
   socket.on('join_game', async (data) => {
+    console.log(`📥 [${socket.id}] Recibido join_game:`, data);
     try {
       const { characterId } = data;
+      console.log(`🔍 [${socket.id}] Buscando personaje ${characterId} para usuario ${socket.userId}`);
 
       // Verificar que el personaje existe y pertenece al usuario
       const character = await Character.findOne({
@@ -167,9 +169,12 @@ io.on('connection', (socket) => {
       });
 
       if (!character) {
+        console.error(`❌ [${socket.id}] Personaje ${characterId} no encontrado`);
         socket.emit('error', { message: 'Personaje no encontrado' });
         return;
       }
+      
+      console.log(`✅ [${socket.id}] Personaje encontrado: ${character.name}`);
 
       // Marcar personaje como online
       character.state.isOnline = true;
@@ -218,15 +223,32 @@ io.on('connection', (socket) => {
 
       console.log(`✅ ${playerData.username} se unió al mapa ${playerData.map} en posición (${savedPosition.x}, ${savedPosition.y})`);
 
-      // Notificar al jugador que se unió exitosamente
-      // IMPORTANTE: Excluir el propio jugador de la lista
-      socket.emit('game_joined', {
-        characterData: character,
-        onlinePlayers: getPlayersInMap(playerData.map, socket.id),
-        startPosition: savedPosition // Enviar posición inicial explícitamente
+      // Obtener lista de jugadores en el mapa (excepto el que se está uniendo)
+      const playersInMap = getPlayersInMap(playerData.map, socket.id);
+      console.log(`📋 [${socket.id}] Jugadores en el mapa ${playerData.map}: ${playersInMap.length}`);
+      playersInMap.forEach(p => {
+        console.log(`  - ${p.username} (${p.socketId}) en (${p.position.x}, ${p.position.y})`);
       });
 
+      // Preparar datos para game_joined
+      const gameJoinedData = {
+        characterData: character,
+        onlinePlayers: playersInMap,
+        startPosition: savedPosition
+      };
+
+      console.log(`📤 [${socket.id}] Enviando game_joined a ${playerData.username}...`);
+      console.log(`  - characterData.name: ${character.name}`);
+      console.log(`  - onlinePlayers.length: ${playersInMap.length}`);
+      console.log(`  - startPosition:`, savedPosition);
+
+      // Notificar al jugador que se unió exitosamente
+      socket.emit('game_joined', gameJoinedData);
+      
+      console.log(`✅ [${socket.id}] game_joined enviado a ${playerData.username}`);
+
       // Notificar a otros jugadores en el mismo mapa con información completa
+      console.log(`📣 [${socket.id}] Enviando player_joined a otros jugadores en ${playerData.map}...`);
       socket.to(playerData.map).emit('player_joined', {
         socketId: socket.id,
         username: playerData.username,
