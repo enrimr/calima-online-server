@@ -404,33 +404,117 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Chat
+  // Chat - Manejo completo de mensajes (Global, Local, Group, Private)
   socket.on('chat_message', (data) => {
     try {
       const player = connectedPlayers.get(socket.id);
-      if (!player) return;
+      if (!player) {
+        console.error('❌ Jugador no encontrado para enviar mensaje de chat');
+        return;
+      }
 
-      const { message, type = 'global' } = data;
+      const { message, type = 'global', targetSocketId } = data;
 
-      // Broadcast del mensaje
-      if (type === 'global') {
-        io.to(player.map).emit('chat_message', {
-          username: player.username,
-          message,
-          type,
-          timestamp: Date.now()
-        });
-      } else if (type === 'local') {
-        // Solo a jugadores cercanos (mismo mapa por ahora)
-        io.to(player.map).emit('chat_message', {
-          username: player.username,
-          message,
-          type,
-          timestamp: Date.now()
-        });
+      console.log(`💬 [${player.username}] Mensaje tipo ${type}:`, message.substring(0, 50));
+
+      // Estructura base del mensaje
+      const chatMessage = {
+        socketId: socket.id,
+        username: player.username,
+        message,
+        type,
+        timestamp: Date.now()
+      };
+
+      switch (type) {
+        case 'global':
+          // Mensaje global: a TODOS los jugadores online en todos los mapas
+          console.log(`📢 [Global] ${player.username}: ${message}`);
+          io.emit('chat_message', chatMessage);
+          break;
+
+        case 'local':
+          // Mensaje local: solo a jugadores en el mismo mapa (cercanos)
+          console.log(`📍 [Local/${player.map}] ${player.username}: ${message}`);
+          io.to(player.map).emit('chat_message', chatMessage);
+          break;
+
+        case 'group':
+          // Mensaje de grupo: por implementar (enviar mensaje de error)
+          console.log(`👥 [Grupo] ${player.username} intentó enviar mensaje de grupo (no implementado)`);
+          socket.emit('chat_message', {
+            socketId: 'system',
+            username: 'Sistema',
+            message: 'Los grupos/parties aún no están implementados. Usa Global o Cercanos.',
+            type: 'system',
+            timestamp: Date.now()
+          });
+          break;
+
+        case 'private':
+          // Mensaje privado: a un jugador específico
+          if (!targetSocketId) {
+            console.error('❌ Mensaje privado sin destinatario');
+            socket.emit('chat_message', {
+              socketId: 'system',
+              username: 'Sistema',
+              message: 'Error: Debes especificar un destinatario para mensajes privados.',
+              type: 'system',
+              timestamp: Date.now()
+            });
+            return;
+          }
+
+          const targetPlayer = connectedPlayers.get(targetSocketId);
+          if (!targetPlayer) {
+            console.error(`❌ Jugador destinatario ${targetSocketId} no encontrado`);
+            socket.emit('chat_message', {
+              socketId: 'system',
+              username: 'Sistema',
+              message: 'Error: El jugador destinatario no está online.',
+              type: 'system',
+              timestamp: Date.now()
+            });
+            return;
+          }
+
+          console.log(`💌 [Privado] ${player.username} → ${targetPlayer.username}: ${message}`);
+
+          // Enviar mensaje al destinatario
+          io.to(targetSocketId).emit('chat_message', {
+            ...chatMessage,
+            targetUsername: player.username // Para que sepa quién le envió el mensaje
+          });
+
+          // Confirmar al remitente (echo del mensaje enviado)
+          socket.emit('chat_message', {
+            socketId: socket.id,
+            username: targetPlayer.username, // Mostrar a quién se lo envió
+            message,
+            type: 'private',
+            timestamp: Date.now()
+          });
+          break;
+
+        default:
+          console.error(`❌ Tipo de mensaje desconocido: ${type}`);
+          socket.emit('chat_message', {
+            socketId: 'system',
+            username: 'Sistema',
+            message: 'Error: Tipo de mensaje no válido.',
+            type: 'system',
+            timestamp: Date.now()
+          });
       }
     } catch (error) {
       console.error('Error en chat_message:', error);
+      socket.emit('chat_message', {
+        socketId: 'system',
+        username: 'Sistema',
+        message: 'Error al enviar mensaje de chat.',
+        type: 'system',
+        timestamp: Date.now()
+      });
     }
   });
 
