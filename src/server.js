@@ -727,10 +727,22 @@ io.on('connection', (socket) => {
       console.log(`✅ ⚔️ PvP COMPLETADO: ${attacker.username} atacó a ${defender.username} (${finalDamage} daño, HP: ${oldHp}→${defender.hp})`);
       console.log(`===================================\n`);
 
-      // Si el defensor murió, manejar muerte
+      // Si el defensor murió, notificar a todos los jugadores en el mapa
       if (targetDied) {
         console.log(`💀 ${defender.username} fue matado por ${attacker.username}`);
-        // TODO: Implementar drop de items, teleport a punto de respawn, etc.
+        
+        // Broadcast cambio de estado a todos en el mapa (incluyendo al defensor)
+        io.to(defender.map).emit('player_state_changed', {
+          socketId: targetSocketId,
+          username: defender.username,
+          isGhost: true,
+          isAlive: false,
+          hp: 0,
+          reason: 'death',
+          killedBy: attacker.username
+        });
+        
+        console.log(`📤 Broadcasting player_state_changed (muerte) a jugadores en ${defender.map}`);
       }
 
     } catch (error) {
@@ -738,6 +750,68 @@ io.on('connection', (socket) => {
       socket.emit('player_attack_result', {
         success: false,
         reason: 'Error del servidor al procesar ataque'
+      });
+    }
+  });
+
+  // Evento: Jugador resucita (desde NPC sacerdote)
+  socket.on('player_resurrect', async (data) => {
+    try {
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      console.log(`⛪ ${player.username} solicita resurrección`);
+
+      // Cargar personaje desde BD
+      const character = await Character.findById(player.characterId);
+      if (!character) return;
+
+      // Verificar que está muerto
+      if (character.stats.hp > 0 && character.state.isAlive) {
+        socket.emit('resurrect_result', {
+          success: false,
+          reason: 'Ya estás vivo'
+        });
+        return;
+      }
+
+      // Resucitar: restaurar HP y estado
+      character.stats.hp = character.stats.maxHp;
+      character.state.isAlive = true;
+      await character.save();
+
+      // Actualizar en connectedPlayers
+      player.hp = character.stats.hp;
+      player.isAlive = true;
+      player.isGhost = false;
+
+      console.log(`⛪ ${player.username} resucitado: HP=${player.hp}/${player.maxHp}`);
+
+      // Notificar al jugador resucitado
+      socket.emit('resurrect_result', {
+        success: true,
+        hp: player.hp,
+        maxHp: player.maxHp
+      });
+
+      // Broadcast cambio de estado a todos en el mapa
+      io.to(player.map).emit('player_state_changed', {
+        socketId: socket.id,
+        username: player.username,
+        isGhost: false,
+        isAlive: true,
+        hp: player.hp,
+        maxHp: player.maxHp,
+        reason: 'resurrection'
+      });
+
+      console.log(`📤 Broadcasting player_state_changed (resurrección) a jugadores en ${player.map}`);
+
+    } catch (error) {
+      console.error('Error en player_resurrect:', error);
+      socket.emit('resurrect_result', {
+        success: false,
+        reason: 'Error del servidor'
       });
     }
   });
