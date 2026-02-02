@@ -1,5 +1,6 @@
 import express from 'express';
 import { getGameStats, getUsers, updateUser, banUser } from '../controllers/adminController.js';
+import { adminUpdateCharacter } from '../controllers/characterController.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -18,5 +19,8 @@ router.put('/users/:userId', updateUser);
 
 // POST /api/admin/users/:userId/ban - Banear/desbanear usuario (solo admin)
 router.post('/users/:userId/ban', banUser);
+
+// PUT /api/admin/characters/:characterId - Actualizar personaje (solo admin)
+router.put('/characters/:characterId', adminUpdateCharacter);
 
 export default router;
