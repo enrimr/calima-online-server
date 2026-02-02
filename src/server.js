@@ -758,16 +758,25 @@ io.on('connection', (socket) => {
   socket.on('player_resurrect', async (data) => {
     try {
       const player = connectedPlayers.get(socket.id);
-      if (!player) return;
+      if (!player) {
+        console.error('❌ Jugador no encontrado para resurrección:', socket.id);
+        return;
+      }
 
-      console.log(`⛪ ${player.username} solicita resurrección`);
+      console.log(`\n⛪ ===== SOLICITUD DE RESURRECCIÓN =====`);
+      console.log(`Jugador: ${player.username} (${socket.id})`);
+      console.log(`Estado actual: isGhost=${player.isGhost}, hp=${player.hp}/${player.maxHp}`);
 
       // Cargar personaje desde BD
       const character = await Character.findById(player.characterId);
-      if (!character) return;
+      if (!character) {
+        console.error('❌ Personaje no encontrado en BD');
+        return;
+      }
 
       // Verificar que está muerto
       if (character.stats.hp > 0 && character.state.isAlive) {
+        console.log('❌ Jugador ya está vivo, rechazando resurrección');
         socket.emit('resurrect_result', {
           success: false,
           reason: 'Ya estás vivo'
@@ -779,6 +788,7 @@ io.on('connection', (socket) => {
       character.stats.hp = character.stats.maxHp;
       character.state.isAlive = true;
       await character.save();
+      console.log(`💾 Estado guardado en BD: hp=${character.stats.hp}, isAlive=true`);
 
       // Actualizar en connectedPlayers
       player.hp = character.stats.hp;
@@ -788,14 +798,15 @@ io.on('connection', (socket) => {
       console.log(`⛪ ${player.username} resucitado: HP=${player.hp}/${player.maxHp}`);
 
       // Notificar al jugador resucitado
+      console.log(`📤 Enviando resurrect_result al jugador resucitado`);
       socket.emit('resurrect_result', {
         success: true,
         hp: player.hp,
         maxHp: player.maxHp
       });
 
-      // Broadcast cambio de estado a todos en el mapa
-      io.to(player.map).emit('player_state_changed', {
+      // Broadcast cambio de estado a TODOS en el mapa (incluyendo al resucitado)
+      const stateChangeData = {
         socketId: socket.id,
         username: player.username,
         isGhost: false,
@@ -803,9 +814,18 @@ io.on('connection', (socket) => {
         hp: player.hp,
         maxHp: player.maxHp,
         reason: 'resurrection'
-      });
-
-      console.log(`📤 Broadcasting player_state_changed (resurrección) a jugadores en ${player.map}`);
+      };
+      
+      console.log(`📤 Broadcasting player_state_changed a jugadores en ${player.map}:`, stateChangeData);
+      
+      // Usar io.to() para enviar a todos en la sala (excluye al emisor)
+      socket.to(player.map).emit('player_state_changed', stateChangeData);
+      
+      // TAMBIÉN enviar al propio jugador para asegurar consistencia
+      socket.emit('player_state_changed', stateChangeData);
+      
+      console.log(`✅ ⛪ RESURRECCIÓN COMPLETADA`);
+      console.log(`===================================\n`);
 
     } catch (error) {
       console.error('Error en player_resurrect:', error);
