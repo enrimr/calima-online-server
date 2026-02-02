@@ -8,9 +8,8 @@ import { connectedPlayers } from '../server.js';
  */
 export const getGameStats = async (req, res) => {
   try {
-    // Verificar que el usuario tiene permisos
-    const user = await User.findById(req.userId);
-    if (!user || (user.role !== 'admin' && user.role !== 'moderator')) {
+    // Verificar que el usuario tiene permisos (ya viene en req.user del middleware)
+    if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'moderator')) {
       return res.status(403).json({
         success: false,
         message: 'No tienes permisos para acceder a esta información'
@@ -123,9 +122,8 @@ export const getGameStats = async (req, res) => {
  */
 export const getUsers = async (req, res) => {
   try {
-    // Verificar que el usuario tiene permisos de admin
-    const user = await User.findById(req.userId);
-    if (!user || user.role !== 'admin') {
+    // Verificar que el usuario tiene permisos de admin (ya viene en req.user del middleware)
+    if (!req.user || req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
         message: 'No tienes permisos para acceder a esta información'
@@ -170,9 +168,8 @@ export const getUsers = async (req, res) => {
  */
 export const banUser = async (req, res) => {
   try {
-    // Verificar que el usuario tiene permisos de admin
-    const adminUser = await User.findById(req.userId);
-    if (!adminUser || adminUser.role !== 'admin') {
+    // Verificar que el usuario tiene permisos de admin (ya viene en req.user del middleware)
+    if (!req.user || req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
         message: 'No tienes permisos para esta acción'
