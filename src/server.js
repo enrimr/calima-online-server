@@ -518,6 +518,205 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ===== COMBAT PVP SYSTEM =====
+
+  // Ataque entre jugadores
+  socket.on('player_attack', async (data) => {
+    try {
+      const attacker = connectedPlayers.get(socket.id);
+      if (!attacker) {
+        console.error('❌ Atacante no encontrado:', socket.id);
+        return;
+      }
+
+      const { targetSocketId, weaponType, position } = data;
+
+      // Validar que el objetivo existe
+      const defender = connectedPlayers.get(targetSocketId);
+      if (!defender) {
+        console.error('❌ Defensor no encontrado:', targetSocketId);
+        socket.emit('player_attack_result', {
+          success: false,
+          reason: 'Jugador objetivo no encontrado'
+        });
+        return;
+      }
+
+      // Validar que están en el mismo mapa
+      if (attacker.map !== defender.map) {
+        console.error('❌ Jugadores en mapas diferentes');
+        socket.emit('player_attack_result', {
+          success: false,
+          reason: 'El jugador objetivo está en otro mapa'
+        });
+        return;
+      }
+
+      // Validar que el atacante está vivo
+      if (attacker.hp <= 0 || attacker.isGhost) {
+        socket.emit('player_attack_result', {
+          success: false,
+          reason: 'No puedes atacar estando muerto'
+        });
+        return;
+      }
+
+      // Validar que el defensor está vivo (no atacar fantasmas)
+      if (defender.hp <= 0 || defender.isGhost) {
+        socket.emit('player_attack_result', {
+          success: false,
+          reason: 'No puedes atacar a un fantasma'
+        });
+        return;
+      }
+
+      // Validar cooldown (anti-spam)
+      const now = Date.now();
+      const ATTACK_COOLDOWN = 1500; // 1.5 segundos
+      if (attacker.lastAttackTime && (now - attacker.lastAttackTime) < ATTACK_COOLDOWN) {
+        const remainingCooldown = Math.ceil((ATTACK_COOLDOWN - (now - attacker.lastAttackTime)) / 1000);
+        socket.emit('player_attack_result', {
+          success: false,
+          reason: `Espera ${remainingCooldown}s para atacar`
+        });
+        return;
+      }
+
+      // Validar rango de ataque
+      const MELEE_RANGE = 1.5;
+      const RANGED_RANGE = 8;
+      const attackRange = weaponType === 'ranged' ? RANGED_RANGE : MELEE_RANGE;
+
+      const dx = position.x - defender.position.x;
+      const dy = position.y - defender.position.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance > attackRange) {
+        socket.emit('player_attack_result', {
+          success: false,
+          reason: 'Objetivo fuera de rango'
+        });
+        return;
+      }
+
+      // ✅ Todas las validaciones pasadas - procesar ataque
+
+      // Actualizar cooldown del atacante
+      attacker.lastAttackTime = now;
+
+      // Calcular daño (servidor autoritario)
+      const attackerCharacter = await Character.findById(attacker.characterId);
+      const defenderCharacter = await Character.findById(defender.characterId);
+
+      if (!attackerCharacter || !defenderCharacter) {
+        console.error('❌ Error al cargar personajes para combate');
+        return;
+      }
+
+      // Cálculo de daño base
+      let baseDamage = 10 + Math.floor(Math.random() * 11); // 10-20
+      baseDamage += attackerCharacter.stats.level * 2;
+
+      // Bonus de arma equipada
+      if (attackerCharacter.equipment && attackerCharacter.equipment.weapon) {
+        // TODO: Implementar bonus de arma desde ItemTypes
+        baseDamage += 5; // Bonus temporal
+      }
+
+      // Reducción por armadura del defensor
+      let defense = 0;
+      if (defenderCharacter.equipment && defenderCharacter.equipment.shield) {
+        defense += 3; // Bonus temporal de escudo
+      }
+
+      const finalDamage = Math.max(1, baseDamage - defense);
+
+      // Aplicar daño al defensor
+      defenderCharacter.stats.hp -= finalDamage;
+      const targetDied = defenderCharacter.stats.hp <= 0;
+
+      if (targetDied) {
+        defenderCharacter.stats.hp = 0;
+        defenderCharacter.state.isAlive = false;
+      }
+
+      // Actualizar HP en connectedPlayers
+      defender.hp = defenderCharacter.stats.hp;
+      defender.isAlive = defenderCharacter.state.isAlive;
+      defender.isGhost = targetDied;
+
+      // Guardar cambios en BD
+      await defenderCharacter.save();
+
+      // Sistema de criminalidad
+      let criminalityGained = 0;
+      const CRIMINAL_THRESHOLD = 50;
+      const CRIMINAL_POINTS_PER_ATTACK = 10;
+      const CRIMINAL_POINTS_PER_KILL = 20;
+
+      // Si el defensor no es criminal, el atacante gana puntos criminales
+      const defenderCriminalStatus = defenderCharacter.criminalStatus || 0;
+      if (defenderCriminalStatus < CRIMINAL_THRESHOLD) {
+        criminalityGained = CRIMINAL_POINTS_PER_ATTACK;
+        
+        if (targetDied) {
+          criminalityGained += CRIMINAL_POINTS_PER_KILL;
+        }
+
+        attackerCharacter.criminalStatus = (attackerCharacter.criminalStatus || 0) + criminalityGained;
+        attacker.criminalStatus = attackerCharacter.criminalStatus;
+        await attackerCharacter.save();
+
+        console.log(`⚖️ ${attacker.username} ganó ${criminalityGained} puntos criminales (total: ${attacker.criminalStatus})`);
+      }
+
+      // Enviar resultado al atacante
+      socket.emit('player_attack_result', {
+        success: true,
+        targetSocketId: targetSocketId,
+        targetUsername: defender.username,
+        damage: finalDamage,
+        targetNewHp: defender.hp,
+        targetDied: targetDied,
+        criminalityGained: criminalityGained
+      });
+
+      // Enviar evento al defensor
+      io.to(targetSocketId).emit('player_attacked', {
+        attackerSocketId: socket.id,
+        attackerUsername: attacker.username,
+        damage: finalDamage,
+        newHp: defender.hp,
+        died: targetDied
+      });
+
+      // Broadcast a espectadores en el mismo mapa
+      socket.to(attacker.map).emit('combat_action', {
+        attackerSocketId: socket.id,
+        attackerUsername: attacker.username,
+        targetSocketId: targetSocketId,
+        targetUsername: defender.username,
+        damage: finalDamage,
+        attackType: weaponType
+      });
+
+      console.log(`⚔️ PvP: ${attacker.username} atacó a ${defender.username} (${finalDamage} daño, HP restante: ${defender.hp})`);
+
+      // Si el defensor murió, manejar muerte
+      if (targetDied) {
+        console.log(`💀 ${defender.username} fue matado por ${attacker.username}`);
+        // TODO: Implementar drop de items, teleport a punto de respawn, etc.
+      }
+
+    } catch (error) {
+      console.error('Error en player_attack:', error);
+      socket.emit('player_attack_result', {
+        success: false,
+        reason: 'Error del servidor al procesar ataque'
+      });
+    }
+  });
+
   // Desconexión (con guardado completo)
   socket.on('disconnect', async () => {
     try {
