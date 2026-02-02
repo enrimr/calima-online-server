@@ -64,8 +64,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Rutas API
+import adminRoutes from './routes/adminRoutes.js';
 app.use('/api/auth', authRoutes);
 app.use('/api/characters', characterRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Ruta de salud
 app.get('/health', (req, res) => {
