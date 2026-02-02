@@ -163,6 +163,59 @@ export const getUsers = async (req, res) => {
 };
 
 /**
+ * Actualizar usuario (solo admin)
+ * PUT /api/admin/users/:userId
+ */
+export const updateUser = async (req, res) => {
+  try {
+    // Verificar que el usuario tiene permisos de admin
+    if (!req.user || req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permisos para esta acción'
+      });
+    }
+
+    const { userId } = req.params;
+    const { email, role, isActive } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    // Actualizar campos
+    if (email) user.email = email.toLowerCase();
+    if (role) user.role = role;
+    if (isActive !== undefined) user.isActive = isActive;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Usuario actualizado exitosamente',
+      data: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        isActive: user.isActive
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al actualizar usuario:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al actualizar usuario'
+    });
+  }
+};
+
+/**
  * Banear/desbanear usuario (solo admin)
  * POST /api/admin/users/:userId/ban
  */

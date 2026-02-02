@@ -1,5 +1,5 @@
 import express from 'express';
-import { getGameStats, getUsers, banUser } from '../controllers/adminController.js';
+import { getGameStats, getUsers, updateUser, banUser } from '../controllers/adminController.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -12,6 +12,9 @@ router.get('/stats', getGameStats);
 
 // GET /api/admin/users - Obtener lista de usuarios (solo admin)
 router.get('/users', getUsers);
+
+// PUT /api/admin/users/:userId - Actualizar usuario (solo admin)
+router.put('/users/:userId', updateUser);
 
 // POST /api/admin/users/:userId/ban - Banear/desbanear usuario (solo admin)
 router.post('/users/:userId/ban', banUser);
