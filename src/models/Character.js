@@ -19,7 +19,7 @@ const characterSchema = new mongoose.Schema({
   class: {
     type: String,
     required: true,
-    enum: ['guerrero', 'mago', 'arquero', 'clerigo', 'asesino', 'paladin', 'bardo'],
+    enum: ['guerrero', 'mago', 'arquero', 'clerigo', 'asesino', 'paladin', 'bardo', 'ladron', 'bandido', 'cazador', 'druida', 'trabajador', 'pirata'],
     default: 'guerrero'
   },
   faction: {
@@ -201,7 +201,13 @@ characterSchema.methods.levelUp = function() {
     clerigo: { str: 1, dex: 1, int: 2, con: 2, cha: 3 },
     asesino: { str: 2, dex: 3, int: 1, con: 1, cha: 1 },
     paladin: { str: 2, dex: 1, int: 1, con: 3, cha: 2 },
-    bardo: { str: 1, dex: 2, int: 2, con: 1, cha: 3 }
+    bardo: { str: 1, dex: 2, int: 2, con: 1, cha: 3 },
+    ladron: { str: 1, dex: 4, int: 1, con: 0, cha: 1 },
+    bandido: { str: 2, dex: 2, int: 0, con: 2, cha: 1 },
+    cazador: { str: 2, dex: 3, int: 0, con: 1, cha: 1 },
+    druida: { str: 1, dex: 1, int: 3, con: 1, cha: 2 },
+    trabajador: { str: 2, dex: 2, int: 1, con: 2, cha: 1 },
+    pirata: { str: 2, dex: 2, int: 0, con: 2, cha: 1 }
   };
   
   const mods = classModifiers[this.class] || classModifiers.guerrero;
