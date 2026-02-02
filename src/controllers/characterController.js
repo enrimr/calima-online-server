@@ -475,6 +475,29 @@ export const adminUpdateCharacter = async (req, res) => {
       });
     }
 
+    // Actualizar nombre si se proporciona
+    if (updates.name && updates.name !== character.name) {
+      // Verificar que el nuevo nombre no esté en uso
+      const nameExists = await Character.findOne({ 
+        name: { $regex: new RegExp(`^${updates.name}$`, 'i') },
+        _id: { $ne: characterId }
+      });
+
+      if (nameExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'Este nombre ya está en uso por otro personaje'
+        });
+      }
+
+      character.name = updates.name;
+    }
+
+    // Actualizar clase
+    if (updates.class) {
+      character.class = updates.class;
+    }
+
     // Actualizar stats si se proporcionan
     if (updates.stats) {
       Object.assign(character.stats, updates.stats);
