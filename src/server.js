@@ -530,6 +530,12 @@ io.on('connection', (socket) => {
       }
 
       const { targetSocketId, weaponType, position } = data;
+      
+      console.log(`\n⚔️ ===== INTENTO DE ATAQUE PVP =====`);
+      console.log(`Atacante: ${attacker.username} (${socket.id})`);
+      console.log(`Objetivo: ${targetSocketId}`);
+      console.log(`Tipo de arma: ${weaponType}`);
+      console.log(`Posición atacante: (${position.x}, ${position.y})`);
 
       // Validar que el objetivo existe
       const defender = connectedPlayers.get(targetSocketId);
@@ -541,6 +547,8 @@ io.on('connection', (socket) => {
         });
         return;
       }
+      
+      console.log(`Defensor: ${defender.username} en (${defender.position.x}, ${defender.position.y})`);
 
       // Validar que están en el mismo mapa
       if (attacker.map !== defender.map) {
@@ -600,11 +608,13 @@ io.on('connection', (socket) => {
       }
 
       // ✅ Todas las validaciones pasadas - procesar ataque
+      console.log(`✅ Validaciones completadas - procesando ataque`);
 
       // Actualizar cooldown del atacante
       attacker.lastAttackTime = now;
 
       // Calcular daño (servidor autoritario)
+      console.log(`🎲 Cargando datos de personajes desde BD...`);
       const attackerCharacter = await Character.findById(attacker.characterId);
       const defenderCharacter = await Character.findById(defender.characterId);
 
@@ -613,25 +623,33 @@ io.on('connection', (socket) => {
         return;
       }
 
+      console.log(`📊 Stats del atacante: Nivel ${attackerCharacter.stats.level}, HP ${attackerCharacter.stats.hp}/${attackerCharacter.stats.maxHp}`);
+      console.log(`📊 Stats del defensor: Nivel ${defenderCharacter.stats.level}, HP ${defenderCharacter.stats.hp}/${defenderCharacter.stats.maxHp}`);
+
       // Cálculo de daño base
       let baseDamage = 10 + Math.floor(Math.random() * 11); // 10-20
       baseDamage += attackerCharacter.stats.level * 2;
+      console.log(`🎲 Daño base calculado: ${baseDamage} (10-20 + nivel*2)`);
 
       // Bonus de arma equipada
       if (attackerCharacter.equipment && attackerCharacter.equipment.weapon) {
         // TODO: Implementar bonus de arma desde ItemTypes
         baseDamage += 5; // Bonus temporal
+        console.log(`🗡️ Bonus de arma: +5 (total: ${baseDamage})`);
       }
 
       // Reducción por armadura del defensor
       let defense = 0;
       if (defenderCharacter.equipment && defenderCharacter.equipment.shield) {
         defense += 3; // Bonus temporal de escudo
+        console.log(`🛡️ Defensa del escudo: -3`);
       }
 
       const finalDamage = Math.max(1, baseDamage - defense);
+      console.log(`💥 Daño final calculado: ${finalDamage} (${baseDamage} - ${defense})`);
 
       // Aplicar daño al defensor
+      const oldHp = defenderCharacter.stats.hp;
       defenderCharacter.stats.hp -= finalDamage;
       const targetDied = defenderCharacter.stats.hp <= 0;
 
@@ -640,6 +658,8 @@ io.on('connection', (socket) => {
         defenderCharacter.state.isAlive = false;
       }
 
+      console.log(`❤️ HP del defensor: ${oldHp} → ${defenderCharacter.stats.hp} (${targetDied ? '💀 MUERTO' : 'VIVO'})`);
+
       // Actualizar HP en connectedPlayers
       defender.hp = defenderCharacter.stats.hp;
       defender.isAlive = defenderCharacter.state.isAlive;
@@ -647,6 +667,7 @@ io.on('connection', (socket) => {
 
       // Guardar cambios en BD
       await defenderCharacter.save();
+      console.log(`💾 Cambios guardados en BD`);
 
       // Sistema de criminalidad
       let criminalityGained = 0;
@@ -671,6 +692,7 @@ io.on('connection', (socket) => {
       }
 
       // Enviar resultado al atacante
+      console.log(`📤 Enviando player_attack_result a atacante (${attacker.username})`);
       socket.emit('player_attack_result', {
         success: true,
         targetSocketId: targetSocketId,
@@ -682,6 +704,7 @@ io.on('connection', (socket) => {
       });
 
       // Enviar evento al defensor
+      console.log(`📤 Enviando player_attacked a defensor (${defender.username})`);
       io.to(targetSocketId).emit('player_attacked', {
         attackerSocketId: socket.id,
         attackerUsername: attacker.username,
@@ -691,6 +714,7 @@ io.on('connection', (socket) => {
       });
 
       // Broadcast a espectadores en el mismo mapa
+      console.log(`📤 Broadcasting combat_action a espectadores en ${attacker.map}`);
       socket.to(attacker.map).emit('combat_action', {
         attackerSocketId: socket.id,
         attackerUsername: attacker.username,
@@ -700,7 +724,8 @@ io.on('connection', (socket) => {
         attackType: weaponType
       });
 
-      console.log(`⚔️ PvP: ${attacker.username} atacó a ${defender.username} (${finalDamage} daño, HP restante: ${defender.hp})`);
+      console.log(`✅ ⚔️ PvP COMPLETADO: ${attacker.username} atacó a ${defender.username} (${finalDamage} daño, HP: ${oldHp}→${defender.hp})`);
+      console.log(`===================================\n`);
 
       // Si el defensor murió, manejar muerte
       if (targetDied) {
