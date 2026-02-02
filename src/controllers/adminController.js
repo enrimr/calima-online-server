@@ -216,6 +216,58 @@ export const updateUser = async (req, res) => {
 };
 
 /**
+ * Obtener todos los personajes del juego (solo admin/moderator)
+ * GET /api/admin/characters
+ */
+export const getAllCharacters = async (req, res) => {
+  try {
+    // Verificar permisos
+    if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'moderator')) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permisos para acceder a esta información'
+      });
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+    const userId = req.query.userId; // Filtro opcional por usuario
+
+    // Construir query
+    const query = userId ? { userId } : {};
+
+    const characters = await Character.find(query)
+      .select('-__v')
+      .sort({ 'stats.level': -1, lastPlayed: -1 })
+      .limit(limit)
+      .skip(skip)
+      .populate('userId', 'username email'); // Incluir info del usuario
+
+    const total = await Character.countDocuments(query);
+
+    res.json({
+      success: true,
+      count: characters.length,
+      data: characters,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener personajes:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener personajes'
+    });
+  }
+};
+
+/**
  * Banear/desbanear usuario (solo admin)
  * POST /api/admin/users/:userId/ban
  */
