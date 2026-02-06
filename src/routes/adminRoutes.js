@@ -1,5 +1,5 @@
 import express from 'express';
-import { getGameStats, getUsers, updateUser, banUser, getAllCharacters } from '../controllers/adminController.js';
+import { getGameStats, getUsers, updateUser, banUser, getAllCharacters, getActiveNPCs } from '../controllers/adminController.js';
 import { adminUpdateCharacter } from '../controllers/characterController.js';
 import { protect } from '../middleware/auth.js';
 
@@ -25,5 +25,8 @@ router.get('/characters', getAllCharacters);
 
 // PUT /api/admin/characters/:characterId - Actualizar personaje (solo admin)
 router.put('/characters/:characterId', adminUpdateCharacter);
+
+// GET /api/admin/npcs - Obtener lista de NPCs activos (solo admin/moderator)
+router.get('/npcs', getActiveNPCs);
 
 export default router;

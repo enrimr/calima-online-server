@@ -1,6 +1,8 @@
 import Character from '../models/Character.js';
 import User from '../models/User.js';
 import { connectedPlayers } from '../server.js';
+import NPCInstance from '../models/NPCInstance.js';
+import NPC from '../models/NPC.js';
 
 /**
  * Obtener estadísticas del juego (solo admin/moderator)
@@ -330,6 +332,120 @@ export const banUser = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error al procesar la acción de ban'
+    });
+  }
+};
+
+/**
+ * Obtener lista de NPCs activos (solo admin/moderator)
+ * GET /api/admin/npcs
+ */
+export const getActiveNPCs = async (req, res) => {
+  try {
+    // Verificar permisos
+    if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'moderator')) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permisos para acceder a esta información'
+      });
+    }
+
+    const mapId = req.query.map; // Filtro opcional por mapa
+
+    // Construir query
+    const query = mapId ? { 'position.map': mapId } : {};
+
+    // Obtener instancias de NPCs activas con referencia al tipo
+    const npcInstances = await NPCInstance.find(query)
+      .populate('npcRef')
+      .sort({ 'position.map': 1, 'position.x': 1, 'position.y': 1 });
+
+    // Obtener tipos de NPCs para hacer lookup manual si npcRef no existe
+    const npcTypes = await NPC.find();
+    const npcTypeMap = {};
+    npcTypes.forEach(type => {
+      npcTypeMap[type.npcTypeId] = type;
+    });
+
+    // Agrupar NPCs por mapa
+    const npcsByMap = {};
+    npcInstances.forEach(instance => {
+      const map = instance.position.map;
+      if (!npcsByMap[map]) {
+        npcsByMap[map] = [];
+      }
+      
+      // Obtener info del tipo de NPC
+      const npcType = instance.npcRef || npcTypeMap[instance.npcTypeId];
+      const npcTypeName = npcType ? npcType.name : 'Desconocido';
+      
+      npcsByMap[map].push({
+        instanceId: instance.instanceId,
+        name: npcType ? npcType.name : 'NPC',
+        npcTypeId: instance.npcTypeId,
+        npcTypeName: npcTypeName,
+        position: instance.position,
+        stats: instance.state || { hp: 0, maxHp: 100, level: 1 },
+        behavior: npcType ? npcType.behavior : { hostile: false },
+        isAlive: instance.state ? instance.state.isAlive : false,
+        spawnedAt: instance.spawnedAt,
+        lastAttackTime: instance.lastMovement
+      });
+    });
+
+    // Estadísticas generales
+    const totalNPCs = npcInstances.length;
+    const aliveNPCs = npcInstances.filter(npc => npc.state && npc.state.isAlive).length;
+    const deadNPCs = totalNPCs - aliveNPCs;
+
+    // NPCs por tipo
+    const npcsByType = {};
+    npcInstances.forEach(instance => {
+      const npcType = instance.npcRef || npcTypeMap[instance.npcTypeId];
+      const typeName = npcType ? npcType.name : 'Desconocido';
+      npcsByType[typeName] = (npcsByType[typeName] || 0) + 1;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        npcs: npcInstances.map(instance => {
+          const npcType = instance.npcRef || npcTypeMap[instance.npcTypeId];
+          return {
+            instanceId: instance.instanceId,
+            name: npcType ? npcType.name : 'NPC',
+            type: npcType ? npcType.name : 'Desconocido',
+            npcTypeId: instance.npcTypeId,
+            position: instance.position,
+            stats: instance.state || { hp: 0, maxHp: 100, level: 1 },
+            behavior: npcType ? npcType.behavior : { hostile: false },
+            isAlive: instance.state ? instance.state.isAlive : false,
+            spawnedAt: instance.spawnedAt,
+            lastAttackTime: instance.lastMovement
+          };
+        }),
+        byMap: npcsByMap,
+        stats: {
+          total: totalNPCs,
+          alive: aliveNPCs,
+          dead: deadNPCs,
+          byType: npcsByType
+        },
+        npcTypes: npcTypes.map(type => ({
+          id: type._id,
+          npcTypeId: type.npcTypeId,
+          name: type.name,
+          stats: type.stats,
+          behavior: type.behavior
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener NPCs:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener lista de NPCs'
     });
   }
 };

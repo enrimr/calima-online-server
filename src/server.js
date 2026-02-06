@@ -11,6 +11,8 @@ import authRoutes from './routes/authRoutes.js';
 import characterRoutes from './routes/characterRoutes.js';
 import Character from './models/Character.js';
 import jwt from 'jsonwebtoken';
+import NPCManager from './systems/NPCManager.js';
+import { getInstance as getMapManager } from './systems/MapManager.js';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -116,10 +118,45 @@ app.use((err, req, res, next) => {
 const connectedPlayers = new Map(); // socketId -> { userId, characterId, username, position, map }
 const characterSockets = new Map(); // characterId -> socketId (para desconexión forzada)
 
+// ==================== NPC SYSTEM ====================
+
+// Inicializar NPCManager
+const npcManager = new NPCManager(io);
+
+// Conectar funciones auxiliares del NPCManager con los datos del servidor
+npcManager.getPlayersInMap = (mapId) => {
+  return getPlayersInMap(mapId);
+};
+
+npcManager.getPlayer = (socketId) => {
+  return connectedPlayers.get(socketId) || null;
+};
+
+// ==================== MAP SYSTEM ====================
+
+// Inicializar MapManager
+const mapManager = getMapManager();
+
+// Inicializar sistemas después de que la base de datos esté conectada
+setTimeout(async () => {
+  try {
+    // Inicializar MapManager (cargar mapas)
+    await mapManager.loadAllMaps();
+    console.log('✅ MapManager inicializado correctamente');
+    
+    // Inicializar NPCManager
+    await npcManager.initialize();
+    console.log('✅ NPCManager inicializado correctamente');
+  } catch (error) {
+    console.error('❌ Error al inicializar sistemas:', error);
+  }
+}, 2000); // Esperar 2 segundos para asegurar conexión a BD
+
 // Timer para guardado automático periódico (configurado en gameConfig.js)
 const AUTOSAVE_INTERVAL = GAME_CONFIG.autosave.interval;
 setInterval(async () => {
-  console.log(`🔄 Guardado automático: ${connectedPlayers.size} jugadores online`);
+  // Log comentado para evitar spam en consola
+  // console.log(`🔄 Guardado automático: ${connectedPlayers.size} jugadores online`);
   
   for (const [socketId, playerData] of connectedPlayers) {
     try {
@@ -232,10 +269,15 @@ io.on('connection', (socket) => {
         console.log(`  - ${p.username} (${p.socketId}) en (${p.position.x}, ${p.position.y})`);
       });
 
+      // Obtener lista de NPCs en el mapa
+      const npcsInMap = await npcManager.getNPCsInMap(playerData.map);
+      console.log(`📋 [${socket.id}] NPCs en el mapa ${playerData.map}: ${npcsInMap.length}`);
+
       // Preparar datos para game_joined
       const gameJoinedData = {
         characterData: character,
         onlinePlayers: playersInMap,
+        npcs: npcsInMap,
         startPosition: savedPosition
       };
 
@@ -280,6 +322,34 @@ io.on('connection', (socket) => {
 
       const { x, y, map } = data;
 
+      // Validar movimiento con MapManager (solo si no es cambio de mapa)
+      if (!map || map === player.map) {
+        const currentMap = map || player.map;
+        const validation = mapManager.validateMovement(
+          currentMap,
+          player.position.x,
+          player.position.y,
+          x,
+          y
+        );
+
+        if (!validation.valid) {
+          console.log(`🚫 Movimiento rechazado para ${player.username}: ${validation.reason}`);
+          // Enviar posición actual de vuelta al cliente para corregir
+          socket.emit('movement_rejected', {
+            reason: validation.reason,
+            correctPosition: player.position
+          });
+          return;
+        }
+
+        // Si hay un portal en la posición de destino, manejarlo
+        if (validation.portal) {
+          console.log(`🚪 ${player.username} usó portal: ${validation.portal.name} -> ${validation.portal.targetMap}`);
+          // El cliente manejará el cambio de mapa con la información del portal
+        }
+      }
+
       // Si cambió de mapa
       if (map && map !== player.map) {
         const oldMap = player.map;
@@ -309,13 +379,16 @@ io.on('connection', (socket) => {
           faction: player.faction
         });
 
-        // IMPORTANTE: Enviar lista de jugadores en el nuevo mapa al jugador que cambió
+        // IMPORTANTE: Enviar lista de jugadores y NPCs en el nuevo mapa al jugador que cambió
+        const npcsInNewMap = await npcManager.getNPCsInMap(map);
+        
         socket.emit('map_changed', {
           newMap: map,
-          playersInMap: getPlayersInMap(map, socket.id)
+          playersInMap: getPlayersInMap(map, socket.id),
+          npcs: npcsInNewMap
         });
         
-        console.log(`🗺️ ${player.username} cambió de ${oldMap} a ${map}, enviando lista de ${getPlayersInMap(map, socket.id).length} jugadores`);
+        console.log(`🗺️ ${player.username} cambió de ${oldMap} a ${map}, enviando lista de ${getPlayersInMap(map, socket.id).length} jugadores y ${npcsInNewMap.length} NPCs`);
       }
 
       // Actualizar posición
@@ -358,9 +431,29 @@ io.on('connection', (socket) => {
       }
 
       // IMPORTANTE: Asegurar consistencia entre HP y estado isAlive
+      const wasAliveBeforeUpdate = player.isAlive && player.hp > 0;
+      
       if (character.stats.hp <= 0) {
         character.stats.hp = 0;
         character.state.isAlive = false;
+        
+        // Si el jugador acaba de morir (transición de vivo a muerto)
+        if (wasAliveBeforeUpdate) {
+          console.log(`💀💀💀 ${player.username} ACABA DE MORIR - Limpiando NPCs...`);
+          console.log(`  Estado anterior: hp=${player.hp}, isAlive=${player.isAlive}, isGhost=${player.isGhost}`);
+          
+          // Actualizar estado en memoria ANTES de limpiar
+          player.hp = 0;
+          player.isAlive = false;
+          player.isGhost = true;
+          
+          console.log(`  Estado nuevo: hp=${player.hp}, isAlive=${player.isAlive}, isGhost=${player.isGhost}`);
+          
+          // Limpiar NPCs
+          await npcManager.clearPlayerAsTarget(socket.id);
+          
+          console.log(`✅ Limpieza de NPCs completada para ${player.username}`);
+        }
       } else if (character.stats.hp > 0 && !character.state.isAlive) {
         // Si tiene HP pero isAlive es false, significa que fue resucitado
         character.state.isAlive = true;
@@ -733,6 +826,9 @@ io.on('connection', (socket) => {
       if (targetDied) {
         console.log(`💀 ${defender.username} fue matado por ${attacker.username}`);
         
+        // IMPORTANTE: Limpiar al jugador muerto como objetivo de todos los NPCs
+        await npcManager.clearPlayerAsTarget(targetSocketId);
+        
         // Broadcast cambio de estado a todos en el mapa (incluyendo al defensor)
         io.to(defender.map).emit('player_state_changed', {
           socketId: targetSocketId,
@@ -752,6 +848,105 @@ io.on('connection', (socket) => {
       socket.emit('player_attack_result', {
         success: false,
         reason: 'Error del servidor al procesar ataque'
+      });
+    }
+  });
+
+  // ===== NPC COMBAT SYSTEM =====
+
+  // Ataque a NPCs
+  socket.on('attack_npc', async (data) => {
+    try {
+      const attacker = connectedPlayers.get(socket.id);
+      if (!attacker) {
+        console.error('❌ Atacante no encontrado:', socket.id);
+        return;
+      }
+
+      const { instanceId, weaponType, position } = data;
+      
+      console.log(`\n⚔️ ===== ATAQUE A NPC =====`);
+      console.log(`Atacante: ${attacker.username} (${socket.id})`);
+      console.log(`NPC: ${instanceId}`);
+      console.log(`Tipo de arma: ${weaponType}`);
+
+      // Validar que el atacante está vivo
+      if (attacker.hp <= 0 || attacker.isGhost) {
+        socket.emit('attack_npc_result', {
+          success: false,
+          reason: 'No puedes atacar estando muerto'
+        });
+        return;
+      }
+
+      // Validar cooldown (anti-spam)
+      const now = Date.now();
+      const ATTACK_COOLDOWN = 1500; // 1.5 segundos
+      if (attacker.lastAttackTime && (now - attacker.lastAttackTime) < ATTACK_COOLDOWN) {
+        const remainingCooldown = Math.ceil((ATTACK_COOLDOWN - (now - attacker.lastAttackTime)) / 1000);
+        socket.emit('attack_npc_result', {
+          success: false,
+          reason: `Espera ${remainingCooldown}s para atacar`
+        });
+        return;
+      }
+
+      // Actualizar cooldown del atacante
+      attacker.lastAttackTime = now;
+
+      // Cargar stats del atacante para calcular daño
+      const attackerCharacter = await Character.findById(attacker.characterId);
+      if (!attackerCharacter) {
+        console.error('❌ Error al cargar personaje atacante');
+        return;
+      }
+
+      // Calcular daño
+      let baseDamage = 10 + Math.floor(Math.random() * 11); // 10-20
+      baseDamage += attackerCharacter.stats.level * 2;
+
+      // Bonus de arma equipada
+      if (attackerCharacter.equipment && attackerCharacter.equipment.weapon) {
+        baseDamage += 5; // Bonus temporal
+      }
+
+      const finalDamage = baseDamage;
+      console.log(`💥 Daño calculado: ${finalDamage}`);
+
+      // Delegar al NPCManager para aplicar el daño
+      const result = await npcManager.damageNPC(
+        instanceId,
+        socket.id,
+        attacker.username,
+        finalDamage
+      );
+
+      if (!result.success) {
+        socket.emit('attack_npc_result', {
+          success: false,
+          reason: result.reason
+        });
+        return;
+      }
+
+      // Enviar resultado al atacante
+      socket.emit('attack_npc_result', {
+        success: true,
+        instanceId,
+        damage: finalDamage,
+        npcHp: result.newHp,
+        npcMaxHp: result.maxHp,
+        npcDied: result.died
+      });
+
+      console.log(`✅ ⚔️ Ataque a NPC completado: ${attacker.username} atacó (${finalDamage} daño)`);
+      console.log(`===================================\n`);
+
+    } catch (error) {
+      console.error('Error en attack_npc:', error);
+      socket.emit('attack_npc_result', {
+        success: false,
+        reason: 'Error del servidor'
       });
     }
   });
