@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { getExpForNextLevel } from '../config/experienceTable.js';
 
 const characterSchema = new mongoose.Schema({
   userId: {
@@ -19,7 +20,7 @@ const characterSchema = new mongoose.Schema({
   class: {
     type: String,
     required: true,
-    enum: ['guerrero', 'mago', 'arquero', 'clerigo', 'asesino', 'paladin', 'bardo', 'ladron', 'bandido', 'cazador', 'druida', 'trabajador', 'pirata'],
+    enum: ['warrior', 'mage', 'archer', 'cleric', 'thief', 'bard', 'guerrero', 'mago', 'arquero', 'clerigo', 'asesino', 'paladin', 'ladron', 'bandido', 'cazador', 'druida', 'trabajador', 'pirata'],
     default: 'guerrero'
   },
   faction: {
@@ -185,63 +186,102 @@ characterSchema.index({ 'state.isOnline': 1 });
 
 // Método para calcular experiencia necesaria para siguiente nivel
 characterSchema.methods.getExpForNextLevel = function() {
-  const level = this.stats.level;
-  return Math.floor(100 * Math.pow(level, 1.5));
+  return getExpForNextLevel(this.stats.level);
 };
 
 // Método para subir de nivel
 characterSchema.methods.levelUp = function() {
+  const oldLevel = this.stats.level;
   this.stats.level += 1;
   
-  // Aumentar stats base según clase
+  // Aumentar stats base según clase (basado en AO)
   const classModifiers = {
-    guerrero: { str: 3, dex: 1, int: 0, con: 3, cha: 1 },
-    mago: { str: 0, dex: 1, int: 3, con: 1, cha: 2 },
-    arquero: { str: 1, dex: 3, int: 1, con: 2, cha: 1 },
-    clerigo: { str: 1, dex: 1, int: 2, con: 2, cha: 3 },
-    asesino: { str: 2, dex: 3, int: 1, con: 1, cha: 1 },
-    paladin: { str: 2, dex: 1, int: 1, con: 3, cha: 2 },
-    bardo: { str: 1, dex: 2, int: 2, con: 1, cha: 3 },
-    ladron: { str: 1, dex: 4, int: 1, con: 0, cha: 1 },
-    bandido: { str: 2, dex: 2, int: 0, con: 2, cha: 1 },
-    cazador: { str: 2, dex: 3, int: 0, con: 1, cha: 1 },
-    druida: { str: 1, dex: 1, int: 3, con: 1, cha: 2 },
-    trabajador: { str: 2, dex: 2, int: 1, con: 2, cha: 1 },
-    pirata: { str: 2, dex: 2, int: 0, con: 2, cha: 1 }
+    // Clases en inglés (Godot client)
+    warrior: { str: 3, dex: 1, int: 0, con: 3, cha: 1, hp: 10, mana: 3 },
+    mage: { str: 0, dex: 1, int: 3, con: 1, cha: 2, hp: 7, mana: 8 },
+    archer: { str: 1, dex: 3, int: 1, con: 2, cha: 1, hp: 9, mana: 4 },
+    cleric: { str: 1, dex: 1, int: 2, con: 2, cha: 3, hp: 8, mana: 7 },
+    thief: { str: 1, dex: 4, int: 1, con: 0, cha: 1, hp: 10, mana: 2 },
+    bard: { str: 1, dex: 2, int: 2, con: 1, cha: 3, hp: 8, mana: 6 },
+    // Clases en español (legacy)
+    guerrero: { str: 3, dex: 1, int: 0, con: 3, cha: 1, hp: 10, mana: 3 },
+    mago: { str: 0, dex: 1, int: 3, con: 1, cha: 2, hp: 7, mana: 8 },
+    arquero: { str: 1, dex: 3, int: 1, con: 2, cha: 1, hp: 9, mana: 4 },
+    clerigo: { str: 1, dex: 1, int: 2, con: 2, cha: 3, hp: 8, mana: 7 },
+    asesino: { str: 2, dex: 3, int: 1, con: 1, cha: 1, hp: 8, mana: 3 },
+    paladin: { str: 2, dex: 1, int: 1, con: 3, cha: 2, hp: 9, mana: 5 },
+    ladron: { str: 1, dex: 4, int: 1, con: 0, cha: 1, hp: 10, mana: 2 },
+    bandido: { str: 2, dex: 2, int: 0, con: 2, cha: 1, hp: 9, mana: 2 },
+    cazador: { str: 2, dex: 3, int: 0, con: 1, cha: 1, hp: 9, mana: 3 },
+    druida: { str: 1, dex: 1, int: 3, con: 1, cha: 2, hp: 8, mana: 7 },
+    trabajador: { str: 2, dex: 2, int: 1, con: 2, cha: 1, hp: 9, mana: 3 },
+    pirata: { str: 2, dex: 2, int: 0, con: 2, cha: 1, hp: 9, mana: 2 }
   };
   
   const mods = classModifiers[this.class] || classModifiers.guerrero;
   
+  // Aumentar stats (máximo 99)
   this.stats.strength = Math.min(99, this.stats.strength + mods.str);
   this.stats.dexterity = Math.min(99, this.stats.dexterity + mods.dex);
   this.stats.intelligence = Math.min(99, this.stats.intelligence + mods.int);
   this.stats.constitution = Math.min(99, this.stats.constitution + mods.con);
   this.stats.charisma = Math.min(99, this.stats.charisma + mods.cha);
   
-  // Aumentar HP y Mana
-  this.stats.maxHp += 10 + Math.floor(this.stats.constitution / 10);
-  this.stats.maxMana += 5 + Math.floor(this.stats.intelligence / 10);
+  // Aumentar HP y Mana según clase
+  const hpGain = mods.hp + Math.floor(this.stats.constitution / 10);
+  const manaGain = mods.mana + Math.floor(this.stats.intelligence / 10);
+  
+  this.stats.maxHp += hpGain;
+  this.stats.maxMana += manaGain;
   this.stats.maxStamina += 5;
   
-  // Curar completamente
+  // Curar completamente al subir de nivel
   this.stats.hp = this.stats.maxHp;
   this.stats.mana = this.stats.maxMana;
   this.stats.stamina = this.stats.maxStamina;
   
-  return this;
+  // Actualizar stats de combate
+  this.stats.minDamage = Math.floor(1 + (this.stats.level / 5));
+  this.stats.maxDamage = Math.floor(3 + (this.stats.level / 3));
+  
+  return {
+    oldLevel,
+    newLevel: this.stats.level,
+    hpGained: hpGain,
+    manaGained: manaGain,
+    newMaxHp: this.stats.maxHp,
+    newMaxMana: this.stats.maxMana,
+    newStats: {
+      strength: this.stats.strength,
+      dexterity: this.stats.dexterity,
+      intelligence: this.stats.intelligence,
+      constitution: this.stats.constitution,
+      charisma: this.stats.charisma
+    }
+  };
 };
 
-// Método para añadir experiencia
+// Método para añadir experiencia y verificar level ups
 characterSchema.methods.addExperience = function(amount) {
   this.stats.experience += amount;
   
-  // Verificar si sube de nivel
-  while (this.stats.experience >= this.getExpForNextLevel() && this.stats.level < 100) {
-    this.stats.experience -= this.getExpForNextLevel();
-    this.levelUp();
+  const levelUps = [];
+  
+  // Verificar si sube de nivel (puede subir múltiples niveles)
+  while (this.stats.experience >= this.getExpForNextLevel() && this.stats.level < 50) {
+    const expNeeded = this.getExpForNextLevel();
+    this.stats.experience -= expNeeded;
+    const levelUpInfo = this.levelUp();
+    levelUps.push(levelUpInfo);
   }
   
-  return this;
+  return {
+    expGained: amount,
+    levelUps: levelUps,
+    currentLevel: this.stats.level,
+    currentExp: this.stats.experience,
+    expForNext: this.getExpForNextLevel()
+  };
 };
 
 // Método para verificar si hay espacio en inventario
