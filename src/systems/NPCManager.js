@@ -248,9 +248,10 @@ class NPCManager {
     instance.position.heading = dir.heading;
     instance.lastMovement = Date.now();
     
-    // Guardar sin bloquear (no await para evitar ParallelSaveError)
+    // Guardar sin bloquear (no await para evitar ParallelSaveError y DocumentNotFoundError)
     instance.save().catch(err => {
-      if (err.name !== 'ParallelSaveError') {
+      // Silenciar errores comunes que no son críticos
+      if (err.name !== 'ParallelSaveError' && err.name !== 'DocumentNotFoundError') {
         console.error('Error guardando movimiento de NPC:', err);
       }
     });
@@ -357,7 +358,7 @@ class NPCManager {
       
       // Guardar sin bloquear
       instance.save().catch(err => {
-        if (err.name !== 'ParallelSaveError') {
+        if (err.name !== 'ParallelSaveError' && err.name !== 'DocumentNotFoundError') {
           console.error('Error guardando objetivo de NPC:', err);
         }
       });
@@ -390,7 +391,7 @@ class NPCManager {
       
       // Guardar sin bloquear
       instance.save().catch(err => {
-        if (err.name !== 'ParallelSaveError') {
+        if (err.name !== 'ParallelSaveError' && err.name !== 'DocumentNotFoundError') {
           console.error('Error guardando reset de objetivo NPC:', err);
         }
       });
@@ -408,7 +409,7 @@ class NPCManager {
       
       // Guardar sin bloquear
       instance.save().catch(err => {
-        if (err.name !== 'ParallelSaveError') {
+        if (err.name !== 'ParallelSaveError' && err.name !== 'DocumentNotFoundError') {
           console.error('Error guardando reset de objetivo NPC:', err);
         }
       });
@@ -426,7 +427,7 @@ class NPCManager {
       
       // Guardar sin bloquear
       instance.save().catch(err => {
-        if (err.name !== 'ParallelSaveError') {
+        if (err.name !== 'ParallelSaveError' && err.name !== 'DocumentNotFoundError') {
           console.error('Error guardando reset de objetivo NPC:', err);
         }
       });
@@ -456,7 +457,7 @@ class NPCManager {
     
     // Guardar sin bloquear
     instance.save().catch(err => {
-      if (err.name !== 'ParallelSaveError') {
+      if (err.name !== 'ParallelSaveError' && err.name !== 'DocumentNotFoundError') {
         console.error('Error guardando ataque de NPC:', err);
       }
     });
@@ -552,9 +553,9 @@ class NPCManager {
     instance.position.heading = heading;
     instance.lastMovement = Date.now();
     
-    // Guardar sin bloquear (no await para evitar ParallelSaveError)
+    // Guardar sin bloquear (no await para evitar ParallelSaveError y DocumentNotFoundError)
     instance.save().catch(err => {
-      if (err.name !== 'ParallelSaveError') {
+      if (err.name !== 'ParallelSaveError' && err.name !== 'DocumentNotFoundError') {
         console.error('Error guardando persecución de NPC:', err);
       }
     });
