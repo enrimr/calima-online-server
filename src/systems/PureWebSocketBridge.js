@@ -29,18 +29,26 @@ export class PureWebSocketBridge {
       port: this.WS_PORT,
       // Verificar origen para seguridad
       verifyClient: (info, callback) => {
+        console.log(`🔍 [WS] Verificando cliente desde: ${info.origin || 'sin origin'}`);
         // Por ahora permitir todos los orígenes
         // TODO: Validar origin en producción
         callback(true);
       }
     });
 
-    console.log(`\n🔌 WebSocket Puro iniciado en puerto ${this.WS_PORT}`);
-    console.log(`   Compatible con Godot WebSocketPeer`);
-    console.log(`   Socket.io en puerto 3001 (navegadores web)`);
+    console.log(`\n╔════════════════════════════════════════════╗`);
+    console.log(`║  WebSocket Puro iniciado en puerto ${this.WS_PORT}  ║`);
+    console.log(`║  Compatible con Godot WebSocketPeer       ║`);
+    console.log(`║  Socket.io en puerto 3001 (web browsers)  ║`);
+    console.log(`╚════════════════════════════════════════════╝\n`);
 
     this.wss.on('connection', (ws, req) => {
-      console.log(`🔌 [WS] Nueva conexión desde ${req.socket.remoteAddress}`);
+      console.log(`\n┌─────────────────────────────────────────┐`);
+      console.log(`│ 🔌 NUEVA CONEXIÓN WEBSOCKET             │`);
+      console.log(`├─────────────────────────────────────────┤`);
+      console.log(`│ IP: ${req.socket.remoteAddress?.padEnd(30)} │`);
+      console.log(`│ Puerto remoto: ${String(req.socket.remotePort).padEnd(22)} │`);
+      console.log(`└─────────────────────────────────────────┘\n`);
 
       // Estado del cliente
       const clientData = {
@@ -54,10 +62,12 @@ export class PureWebSocketBridge {
       this.wsClients.set(ws, clientData);
 
       // Enviar socket ID al cliente
+      console.log(`📤 [WS ${clientData.socketId}] Enviando socket_id al cliente`);
       this._send(ws, 'socket_id', { id: clientData.socketId });
 
       // Manejar mensajes
       ws.on('message', (data) => {
+        console.log(`📨 [WS ${clientData.socketId}] Mensaje RAW recibido (${data.length} bytes)`);
         this._handleMessage(ws, data, clientData);
       });
 
@@ -86,33 +96,48 @@ export class PureWebSocketBridge {
    */
   _handleMessage(ws, data, clientData) {
     try {
-      const message = JSON.parse(data.toString());
+      const rawMessage = data.toString();
+      console.log(`\n┌─ Mensaje WebSocket ─────────────────────`);
+      console.log(`│ ID: ${clientData.socketId}`);
+      console.log(`│ Raw: ${rawMessage.substring(0, 100)}${rawMessage.length > 100 ? '...' : ''}`);
+      
+      const message = JSON.parse(rawMessage);
       const { event, data: eventData } = message;
 
-      console.log(`📥 [WS ${clientData.socketId}] Evento: ${event}`);
+      console.log(`│ Evento parseado: ${event}`);
+      console.log(`│ Data keys: ${Object.keys(eventData || {}).join(', ') || 'ninguna'}`);
+      console.log(`└──────────────────────────────────────────\n`);
 
       // Rutas que no requieren autenticación
       switch (event) {
         case 'authenticate':
+          console.log(`🔐 [WS ${clientData.socketId}] → Procesando autenticación`);
           this._handleAuthentication(ws, eventData, clientData);
           return;
           
         case 'ping':
+          console.log(`🏓 [WS ${clientData.socketId}] → Ping recibido, enviando pong`);
           this._send(ws, 'pong', { timestamp: Date.now() });
           return;
       }
 
       // Todas las demás rutas requieren autenticación
       if (!clientData.authenticated) {
+        console.log(`🚫 [WS ${clientData.socketId}] → Rechazado: No autenticado`);
         this._send(ws, 'error', { message: 'No autenticado. Envía "authenticate" primero.' });
         return;
       }
 
       // Reenviar evento a Socket.io (bridge)
+      console.log(`🌉 [WS ${clientData.socketId}] → Reenviando evento '${event}' al bridge`);
       this._bridgeToSocketIO(event, eventData, clientData);
 
     } catch (error) {
-      console.error(`❌ [WS] Error procesando mensaje:`, error);
+      console.error(`\n❌❌❌ ERROR PROCESANDO MENSAJE ❌❌❌`);
+      console.error(`   Socket ID: ${clientData.socketId}`);
+      console.error(`   Error: ${error.message}`);
+      console.error(`   Stack:`, error.stack);
+      console.error(`   Data raw: ${data.toString().substring(0, 200)}`);
       this._send(ws, 'error', { message: 'Error al procesar mensaje' });
     }
   }
@@ -215,6 +240,9 @@ export class PureWebSocketBridge {
     if (ws.readyState === 1) { // OPEN
       const message = JSON.stringify({ event, data });
       ws.send(message);
+      console.log(`📤 [WS] Enviado: ${event} (${message.length} bytes)`);
+    } else {
+      console.warn(`⚠️ [WS] No se pudo enviar ${event}: Socket no está abierto (estado: ${ws.readyState})`);
     }
   }
 
