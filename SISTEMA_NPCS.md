@@ -62,7 +62,8 @@ Define las características estáticas de un tipo de NPC:
     movement: String,       // static, random, chase, patrol
     movementSpeed: Number,
     attackRange: Number,
-    chaseRange: Number
+    chaseRange: Number,
+    canPathfind: Boolean    // Si puede usar A* para rodear obstáculos
   },
   rewards: {                // Recompensas
     experience: Number,

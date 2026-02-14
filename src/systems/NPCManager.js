@@ -1,5 +1,7 @@
 import NPC from '../models/NPC.js';
 import NPCInstance from '../models/NPCInstance.js';
+import Character from '../models/Character.js';
+import { applyClassModifier } from '../config/experienceTable.js';
 import { v4 as uuidv4 } from 'uuid';
 
 class NPCManager {
@@ -78,6 +80,12 @@ class NPCManager {
       
       if (!npcType) {
         console.error(`❌ Tipo de NPC ${npcTypeId} no encontrado`);
+        return null;
+      }
+      
+      // Validar que la posición de spawn no está bloqueada
+      if (this.mapManager && !this.mapManager.isWalkable(mapId, x, y)) {
+        console.error(`❌ No se puede spawnear ${npcType.name} en (${x}, ${y}) - tile bloqueado`);
         return null;
       }
       
@@ -219,8 +227,8 @@ class NPCManager {
     const newX = x + dir.dx;
     const newY = y + dir.dy;
     
-    // Validar nueva posición (simplificado, se puede mejorar con tilemap)
-    if (newX < 1 || newX > 100 || newY < 1 || newY > 100) {
+    // Validar colisión con el mapa (tiles bloqueados)
+    if (this.mapManager && !this.mapManager.isWalkable(map, newX, newY)) {
       return;
     }
     
@@ -477,40 +485,65 @@ class NPCManager {
     const npcData = this.activeNPCs.get(instanceId);
     if (!npcData) return;
     
-    const { instance } = npcData;
+    const { instance, npcType } = npcData;
     const { x, y, map } = instance.position;
-    
-    // Calcular dirección hacia el objetivo
-    const dx = target.position.x - x;
-    const dy = target.position.y - y;
     
     let newX = x;
     let newY = y;
     let heading = instance.position.heading;
     
-    // Moverse hacia el objetivo
-    if (Math.abs(dx) > Math.abs(dy)) {
-      newX += dx > 0 ? 1 : -1;
-      heading = dx > 0 ? 2 : 4; // Este u Oeste
+    // Verificar si este NPC puede usar pathfinding
+    const canPathfind = npcType.behavior.canPathfind || false;
+    
+    if (canPathfind && this.mapManager) {
+      // Usar pathfinding A* para encontrar el camino
+      const path = this.findPath(map, x, y, target.position.x, target.position.y, instanceId);
+      
+      if (path && path.length > 0) {
+        // Tomar el primer paso del camino
+        const nextStep = path[0];
+        newX = nextStep.x;
+        newY = nextStep.y;
+        
+        // Calcular heading basado en la dirección del movimiento
+        const dx = newX - x;
+        const dy = newY - y;
+        if (dx > 0) heading = 2; // Este
+        else if (dx < 0) heading = 4; // Oeste
+        else if (dy > 0) heading = 3; // Sur
+        else if (dy < 0) heading = 1; // Norte
+      } else {
+        // No hay camino disponible, el NPC se queda en su posición
+        return;
+      }
     } else {
-      newY += dy > 0 ? 1 : -1;
-      heading = dy > 0 ? 3 : 1; // Sur o Norte
-    }
-    
-    // Validar nueva posición
-    if (newX < 1 || newX > 100 || newY < 1 || newY > 100) {
-      return;
-    }
-    
-    // Validar colisión con otros NPCs
-    if (this.isPositionOccupiedByNPC(newX, newY, map, instanceId)) {
-      return;
-    }
-    
-    // Validar colisión con jugadores (SIEMPRE, sin excepciones)
-    // Los NPCs NO pueden ocupar la misma casilla que los jugadores
-    if (this.isPositionOccupiedByPlayer(newX, newY, map)) {
-      return;
+      // Movimiento simple sin pathfinding (comportamiento original)
+      const dx = target.position.x - x;
+      const dy = target.position.y - y;
+      
+      // Moverse hacia el objetivo
+      if (Math.abs(dx) > Math.abs(dy)) {
+        newX += dx > 0 ? 1 : -1;
+        heading = dx > 0 ? 2 : 4; // Este u Oeste
+      } else {
+        newY += dy > 0 ? 1 : -1;
+        heading = dy > 0 ? 3 : 1; // Sur o Norte
+      }
+      
+      // Validar colisión con el mapa (tiles bloqueados)
+      if (this.mapManager && !this.mapManager.isWalkable(map, newX, newY)) {
+        return;
+      }
+      
+      // Validar colisión con otros NPCs
+      if (this.isPositionOccupiedByNPC(newX, newY, map, instanceId)) {
+        return;
+      }
+      
+      // Validar colisión con jugadores (SIEMPRE, sin excepciones)
+      if (this.isPositionOccupiedByPlayer(newX, newY, map)) {
+        return;
+      }
     }
     
     // Actualizar posición
@@ -625,10 +658,27 @@ class NPCManager {
     );
     
     // Distribuir experiencia y oro a los jugadores
+    console.log(`\n💰 DISTRIBUYENDO RECOMPENSAS DE ${npcType.name}:`);
+    console.log(`  Total jugadores participantes: ${rewards.distribution.length}`);
+    
     for (const reward of rewards.distribution) {
-      const player = this.getPlayer(reward.playerId);
-      if (!player) continue;
+      console.log(`\n  Procesando recompensa para ${reward.playerName} (${reward.playerId}):`);
+      console.log(`    EXP: ${reward.experience}, Oro: ${reward.gold}, Killer: ${reward.wasKiller}`);
       
+      const player = this.getPlayer(reward.playerId);
+      if (!player) {
+        console.error(`    ❌ Jugador no encontrado en connectedPlayers`);
+        continue;
+      }
+      
+      console.log(`    ✅ Jugador encontrado: ${player.username}`);
+      
+      // Actualizar experiencia y oro del jugador en la BD
+      console.log(`    🔄 Actualizando stats en BD...`);
+      await this.updatePlayerRewards(reward.playerId, reward.experience, reward.gold);
+      console.log(`    ✅ Stats actualizados en BD`);
+      
+      console.log(`    📤 Enviando evento npc_reward al cliente...`);
       this.io.to(reward.playerId).emit('npc_reward', {
         instanceId,
         npcName: npcType.name,
@@ -636,9 +686,11 @@ class NPCManager {
         gold: reward.gold,
         wasKiller: reward.wasKiller
       });
+      console.log(`    ✅ Evento npc_reward enviado`);
       
       console.log(`💰 ${reward.playerName} recibió ${reward.experience} EXP y ${reward.gold} oro (killer: ${reward.wasKiller})`);
     }
+    console.log(`\n✅ RECOMPENSAS DISTRIBUIDAS\n`);
     
     // Dropear items
     await this.dropNPCLoot(instanceId);
@@ -804,6 +856,108 @@ class NPCManager {
     }
   }
 
+  // ==================== PATHFINDING SYSTEM ====================
+
+  /**
+   * Implementación del algoritmo A* para pathfinding
+   * @param {string} mapId - ID del mapa
+   * @param {number} startX - X inicial
+   * @param {number} startY - Y inicial
+   * @param {number} goalX - X destino
+   * @param {number} goalY - Y destino
+   * @param {string} excludeInstanceId - ID del NPC a excluir en colisiones
+   * @returns {Array|null} Array de posiciones [{x, y}] o null si no hay camino
+   */
+  findPath(mapId, startX, startY, goalX, goalY, excludeInstanceId = null) {
+    // Heurística: distancia Manhattan
+    const heuristic = (x, y) => Math.abs(x - goalX) + Math.abs(y - goalY);
+    
+    // Nodo del algoritmo A*
+    class Node {
+      constructor(x, y, g, h, parent = null) {
+        this.x = x;
+        this.y = y;
+        this.g = g; // Costo desde el inicio
+        this.h = h; // Heurística al destino
+        this.f = g + h; // Costo total
+        this.parent = parent;
+      }
+    }
+    
+    const openSet = [new Node(startX, startY, 0, heuristic(startX, startY))];
+    const closedSet = new Set();
+    const visited = new Map();
+    
+    visited.set(`${startX},${startY}`, 0);
+    
+    // Limitar iteraciones para evitar bucles infinitos
+    const MAX_ITERATIONS = 200;
+    let iterations = 0;
+    
+    while (openSet.length > 0 && iterations < MAX_ITERATIONS) {
+      iterations++;
+      
+      // Obtener nodo con menor f
+      openSet.sort((a, b) => a.f - b.f);
+      const current = openSet.shift();
+      
+      // ¿Llegamos al destino?
+      if (current.x === goalX && current.y === goalY) {
+        // Reconstruir camino
+        const path = [];
+        let node = current;
+        while (node.parent) {
+          path.unshift({ x: node.x, y: node.y });
+          node = node.parent;
+        }
+        return path;
+      }
+      
+      closedSet.add(`${current.x},${current.y}`);
+      
+      // Explorar vecinos (4 direcciones)
+      const neighbors = [
+        { x: current.x, y: current.y - 1 }, // Norte
+        { x: current.x + 1, y: current.y }, // Este
+        { x: current.x, y: current.y + 1 }, // Sur
+        { x: current.x - 1, y: current.y }  // Oeste
+      ];
+      
+      for (const neighbor of neighbors) {
+        const key = `${neighbor.x},${neighbor.y}`;
+        
+        // Saltar si ya está en closed set
+        if (closedSet.has(key)) continue;
+        
+        // Verificar colisiones
+        const isWalkable = !this.mapManager || this.mapManager.isWalkable(mapId, neighbor.x, neighbor.y);
+        const hasNPC = this.isPositionOccupiedByNPC(neighbor.x, neighbor.y, mapId, excludeInstanceId);
+        const hasPlayer = this.isPositionOccupiedByPlayer(neighbor.x, neighbor.y, mapId);
+        
+        // Permitir el destino incluso si hay un jugador (para atacar)
+        const isGoal = neighbor.x === goalX && neighbor.y === goalY;
+        
+        if (!isWalkable || hasNPC || (hasPlayer && !isGoal)) {
+          continue;
+        }
+        
+        const g = current.g + 1;
+        const h = heuristic(neighbor.x, neighbor.y);
+        
+        // Si ya visitamos este nodo con mejor costo, saltar
+        if (visited.has(key) && visited.get(key) <= g) {
+          continue;
+        }
+        
+        visited.set(key, g);
+        openSet.push(new Node(neighbor.x, neighbor.y, g, h, current));
+      }
+    }
+    
+    // No se encontró camino
+    return null;
+  }
+
   // ==================== COLLISION DETECTION ====================
 
   isPositionOccupiedByNPC(x, y, mapId, excludeInstanceId = null) {
@@ -840,6 +994,99 @@ class NPCManager {
   }
 
   // ==================== UTILITY METHODS ====================
+
+  /**
+   * Actualizar las recompensas (experiencia y oro) de un jugador
+   * @param {string} playerId - Socket ID del jugador
+   * @param {number} experience - Experiencia base ganada
+   * @param {number} gold - Oro ganado
+   */
+  async updatePlayerRewards(playerId, experience, gold) {
+    try {
+      const player = this.connectedPlayers.get(playerId);
+      
+      if (!player) {
+        console.error(`❌ No se pudo encontrar jugador con ID: ${playerId}`);
+        return;
+      }
+
+      console.log(`  ✅ Jugador encontrado: ${player.username} (${player.characterId})`);
+
+      // Buscar el personaje en la BD
+      const character = await Character.findById(player.characterId);
+      
+      if (!character) {
+        console.error(`❌ No se pudo encontrar personaje en BD: ${player.characterId}`);
+        return;
+      }
+
+      // Aplicar modificador de clase a la experiencia
+      const modifiedExp = applyClassModifier(experience, character.class);
+      console.log(`  💫 EXP modificada por clase ${character.class}: ${experience} → ${modifiedExp}`);
+
+      // Añadir oro primero
+      character.stats.gold = (character.stats.gold || 0) + gold;
+
+      // Añadir experiencia y verificar level ups
+      const result = character.addExperience(modifiedExp);
+
+      // Guardar cambios en BD
+      await character.save();
+
+      console.log(`📈 ${player.username}: +${modifiedExp} EXP (${result.currentExp}/${result.expForNext}), +${gold} oro (${character.stats.gold})`);
+
+      // Si hubo level ups, notificar al jugador
+      if (result.levelUps && result.levelUps.length > 0) {
+        console.log(`\n🎉🎉🎉 ${player.username} SUBIÓ ${result.levelUps.length} NIVEL(ES)! 🎉🎉🎉`);
+        
+        for (const levelUp of result.levelUps) {
+          console.log(`  Nivel: ${levelUp.oldLevel} → ${levelUp.newLevel}`);
+          console.log(`  HP: +${levelUp.hpGained} → ${levelUp.newMaxHp} (curado a ${character.stats.hp})`);
+          console.log(`  Mana: +${levelUp.manaGained} → ${levelUp.newMaxMana} (curado a ${character.stats.mana})`);
+          console.log(`  Stats:`, levelUp.newStats);
+        }
+        
+        console.log(`  EXP sobrante: ${result.currentExp}/${result.expForNext}\n`);
+
+        // Enviar evento detallado de level up al cliente
+        console.log(`  📤 Enviando evento level_up al cliente...`);
+        this.io.to(playerId).emit('level_up', {
+          levelsGained: result.levelUps.length,
+          newLevel: result.currentLevel,
+          currentExp: result.currentExp,
+          expForNext: result.expForNext,
+          newMaxHp: character.stats.maxHp,
+          newMaxMana: character.stats.maxMana,
+          newMaxStamina: character.stats.maxStamina,
+          currentHp: character.stats.hp,
+          currentMana: character.stats.mana,
+          currentStamina: character.stats.stamina,
+          newStats: result.levelUps[result.levelUps.length - 1].newStats,
+          levelUpDetails: result.levelUps
+        });
+        console.log(`  ✅ Evento level_up enviado\n`);
+
+        // Actualizar el jugador conectado con los nuevos stats
+        player.level = result.currentLevel;
+        this.connectedPlayers.set(playerId, player);
+      }
+
+      // Siempre enviar actualización de stats (incluso sin level up)
+      this.io.to(playerId).emit('stats_update', {
+        experience: result.currentExp,
+        expForNext: result.expForNext,
+        gold: character.stats.gold,
+        level: result.currentLevel,
+        hp: character.stats.hp,
+        maxHp: character.stats.maxHp,
+        mana: character.stats.mana,
+        maxMana: character.stats.maxMana
+      });
+
+    } catch (error) {
+      console.error('❌ Error al actualizar recompensas:', error);
+    }
+  }
 
   /**
    * Limpiar un jugador como objetivo de todos los NPCs

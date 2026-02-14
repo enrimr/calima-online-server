@@ -20,10 +20,17 @@ class MapManager {
         this.maps = new Map();
         this.mapsDirectory = path.join(__dirname, '../data/maps');
         
-        // Tiles que bloquean el movimiento
+        // Tiles que bloquean el movimiento (basado en el cliente)
+        // El cliente considera caminables: GRASS (0), FLOOR (6), PATH (8), FLOOR_INTERIOR (11)
+        // Por lo tanto, todos los demás están bloqueados
         this.BLOCKED_TILES = {
-            base: [4, 8], // 4 = montaña, 8 = agua/bordes
-            props: [2, 3] // 2 y 3 = árboles/obstáculos
+            base: [2,3, 4, 5, 14, 15, 24, 26, 27, 22, 23, 34, 36, 37], // 4 = montaña/bordes, 5 = paredes, 14-15 = puertas cerradas
+            props: [2, 3, 22, 23, 26, 27, 29, 24, 36, 37] // 2 y 3 = árboles/obstáculos
+        };
+        
+        // Tiles explícitamente caminables
+        this.WALKABLE_TILES = {
+            base: [0, 6, 8, 11, 20, 21, 9, 17, 31, 32] // 0 = grass, 6 = floor, 8 = path, 11 = floor interior
         };
     }
 
@@ -95,8 +102,10 @@ class MapManager {
 
         // Verificar capa base (terrain)
         const baseTile = layers.base[y][x];
-        if (this.BLOCKED_TILES.base.includes(baseTile)) {
-            return false; // Tile bloqueado (agua, montaña, etc.)
+        
+        // Usar lista de tiles explícitamente caminables (más confiable que lista de bloqueados)
+        if (!this.WALKABLE_TILES.base.includes(baseTile)) {
+            return false; // Tile no está en la lista de caminables
         }
 
         // Verificar capa de props (árboles, rocas, etc.)

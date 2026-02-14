@@ -13,6 +13,7 @@ import Character from './models/Character.js';
 import jwt from 'jsonwebtoken';
 import NPCManager from './systems/NPCManager.js';
 import { getInstance as getMapManager } from './systems/MapManager.js';
+import PureWebSocketBridge from './systems/PureWebSocketBridge.js';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -118,6 +119,12 @@ app.use((err, req, res, next) => {
 const connectedPlayers = new Map(); // socketId -> { userId, characterId, username, position, map }
 const characterSockets = new Map(); // characterId -> socketId (para desconexión forzada)
 
+// ==================== PURE WEBSOCKET BRIDGE ====================
+
+// Inicializar WebSocket Bridge (puerto 3002) para Godot
+const wsBridge = new PureWebSocketBridge(httpServer, io, connectedPlayers);
+wsBridge.initialize();
+
 // ==================== NPC SYSTEM ====================
 
 // Inicializar NPCManager
@@ -143,6 +150,10 @@ setTimeout(async () => {
     // Inicializar MapManager (cargar mapas)
     await mapManager.loadAllMaps();
     console.log('✅ MapManager inicializado correctamente');
+    
+    // IMPORTANTE: Asignar MapManager al NPCManager para colisiones
+    npcManager.mapManager = mapManager;
+    console.log('✅ MapManager asignado a NPCManager');
     
     // Inicializar NPCManager
     await npcManager.initialize();
@@ -673,14 +684,26 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Validar cooldown (anti-spam)
+      // Rate limiting mejorado: 10 ataques por segundo (ventana deslizante)
       const now = Date.now();
-      const ATTACK_COOLDOWN = 1500; // 1.5 segundos
-      if (attacker.lastAttackTime && (now - attacker.lastAttackTime) < ATTACK_COOLDOWN) {
-        const remainingCooldown = Math.ceil((ATTACK_COOLDOWN - (now - attacker.lastAttackTime)) / 1000);
+      const RATE_LIMIT_WINDOW = 1000; // 1 segundo
+      const MAX_ATTACKS_PER_WINDOW = 10; // Máximo 10 ataques por segundo
+      
+      // Inicializar array de ataques si no existe
+      if (!attacker.recentAttacks) {
+        attacker.recentAttacks = [];
+      }
+      
+      // Limpiar ataques fuera de la ventana de tiempo
+      attacker.recentAttacks = attacker.recentAttacks.filter(
+        timestamp => (now - timestamp) < RATE_LIMIT_WINDOW
+      );
+      
+      // Verificar si excede el límite
+      if (attacker.recentAttacks.length >= MAX_ATTACKS_PER_WINDOW) {
         socket.emit('player_attack_result', {
           success: false,
-          reason: `Espera ${remainingCooldown}s para atacar`
+          reason: 'Demasiados ataques, espera un momento'
         });
         return;
       }
@@ -705,8 +728,8 @@ io.on('connection', (socket) => {
       // ✅ Todas las validaciones pasadas - procesar ataque
       console.log(`✅ Validaciones completadas - procesando ataque`);
 
-      // Actualizar cooldown del atacante
-      attacker.lastAttackTime = now;
+      // Registrar este ataque en el rate limiter
+      attacker.recentAttacks.push(now);
 
       // Calcular daño (servidor autoritario)
       console.log(`🎲 Cargando datos de personajes desde BD...`);
@@ -879,20 +902,32 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Validar cooldown (anti-spam)
+      // Rate limiting mejorado: 10 ataques por segundo (ventana deslizante)
       const now = Date.now();
-      const ATTACK_COOLDOWN = 1500; // 1.5 segundos
-      if (attacker.lastAttackTime && (now - attacker.lastAttackTime) < ATTACK_COOLDOWN) {
-        const remainingCooldown = Math.ceil((ATTACK_COOLDOWN - (now - attacker.lastAttackTime)) / 1000);
+      const RATE_LIMIT_WINDOW = 1000; // 1 segundo
+      const MAX_ATTACKS_PER_WINDOW = 10; // Máximo 10 ataques por segundo
+      
+      // Inicializar array de ataques si no existe
+      if (!attacker.recentAttacks) {
+        attacker.recentAttacks = [];
+      }
+      
+      // Limpiar ataques fuera de la ventana de tiempo
+      attacker.recentAttacks = attacker.recentAttacks.filter(
+        timestamp => (now - timestamp) < RATE_LIMIT_WINDOW
+      );
+      
+      // Verificar si excede el límite
+      if (attacker.recentAttacks.length >= MAX_ATTACKS_PER_WINDOW) {
         socket.emit('attack_npc_result', {
           success: false,
-          reason: `Espera ${remainingCooldown}s para atacar`
+          reason: 'Demasiados ataques, espera un momento'
         });
         return;
       }
-
-      // Actualizar cooldown del atacante
-      attacker.lastAttackTime = now;
+      
+      // Registrar este ataque
+      attacker.recentAttacks.push(now);
 
       // Cargar stats del atacante para calcular daño
       const attackerCharacter = await Character.findById(attacker.characterId);
@@ -1102,10 +1137,13 @@ const PORT = process.env.PORT || 3000;
 
 // Solo iniciar el servidor si no estamos en Vercel (Vercel maneja el inicio)
 if (process.env.VERCEL !== '1') {
-  httpServer.listen(PORT, () => {
+  const HOST = '0.0.0.0'; // Escuchar en todas las interfaces (necesario para Docker)
+  
+  httpServer.listen(PORT, HOST, () => {
     console.log('\n===========================================');
     console.log(`🚀 Servidor Calima Online iniciado`);
     console.log(`📡 Puerto: ${PORT}`);
+    console.log(`🌐 Host: ${HOST} (accesible desde localhost:${PORT})`);
     console.log(`🌍 Modo: ${process.env.NODE_ENV || 'development'}`);
     console.log(`🔗 URL: http://localhost:${PORT}`);
     console.log('===========================================\n');

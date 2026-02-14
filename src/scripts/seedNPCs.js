@@ -3,12 +3,21 @@ import dotenv from 'dotenv';
 import NPC from '../models/NPC.js';
 
 // Cargar variables de entorno
-dotenv.config();
+// Si se especifica DOTENV_CONFIG_PATH, usar ese archivo
+// node src/scripts/seedNPCs.js --env=.env.local
+const envPath = process.argv.includes('--env=.env.local') ? '.env.local' : '.env';
+dotenv.config({ path: envPath });
+
+console.log(`📁 Cargando variables de entorno desde: ${envPath}`);
+console.log(`🔗 MongoDB URI: ${process.env.MONGODB_URI}`);
 
 // Conectar a la base de datos
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/calima-online', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+console.log(`📡 Conectando a MongoDB...`);
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/calima-online');
+
+mongoose.connection.once('open', () => {
+  console.log(`✅ Conectado a MongoDB: ${mongoose.connection.host}`);
+  console.log(`📊 Base de datos: ${mongoose.connection.name}\n`);
 });
 
 const sampleNPCs = [
@@ -330,26 +339,47 @@ const sampleNPCs = [
 
 async function seedNPCs() {
   try {
+    // Esperar a que la conexión esté completamente establecida
+    await mongoose.connection.asPromise();
+    
     console.log('🌱 Iniciando seed de NPCs...');
+    console.log(`📊 Colección: ${NPC.collection.name}`);
+    
+    // Contar NPCs existentes
+    const existingCount = await NPC.countDocuments();
+    console.log(`📋 NPCs existentes: ${existingCount}`);
     
     // Limpiar NPCs existentes
-    await NPC.deleteMany({});
-    console.log('🧹 NPCs existentes eliminados');
+    const deleteResult = await NPC.deleteMany({});
+    console.log(`🧹 ${deleteResult.deletedCount} NPCs existentes eliminados`);
     
     // Insertar nuevos NPCs
+    console.log(`📥 Insertando ${sampleNPCs.length} NPCs...`);
     const result = await NPC.insertMany(sampleNPCs);
     console.log(`✅ ${result.length} NPCs creados exitosamente`);
     
+    // Verificar que se guardaron
+    const newCount = await NPC.countDocuments();
+    console.log(`📊 Total NPCs en BD: ${newCount}`);
+    
     // Mostrar resumen
+    console.log(`\n📋 NPCs creados:`);
     for (const npc of result) {
       console.log(`  - ${npc.name} (ID: ${npc.npcTypeId}, Tipo: ${npc.type})`);
     }
     
     console.log('\n🎉 Seed completado exitosamente');
+    console.log(`💾 Verifica en MongoDB: db.npcs.find()`);
+    
+    // Cerrar conexión y salir
+    await mongoose.connection.close();
+    console.log('🔌 Conexión a MongoDB cerrada');
     process.exit(0);
     
   } catch (error) {
     console.error('❌ Error al hacer seed de NPCs:', error);
+    console.error('Stack trace:', error.stack);
+    await mongoose.connection.close();
     process.exit(1);
   }
 }

@@ -1,0 +1,1 @@
+# Configuración de Mapas para Sistema de Colisiones

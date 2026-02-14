@@ -55,6 +55,7 @@ export const getGameStats = async (req, res) => {
     // Jugadores online actuales (desde memoria)
     const currentOnlinePlayers = Array.from(connectedPlayers.values()).map(p => ({
       socketId: p.userId, // No exponer socketId real por seguridad
+      characterId: p.characterId,
       username: p.username,
       level: p.level,
       map: p.map,
@@ -337,9 +338,162 @@ export const banUser = async (req, res) => {
 };
 
 /**
+ * Actualizar personaje (solo admin/moderator)
+ * PUT /api/admin/characters/:characterId
+ */
+export const updateCharacter = async (req, res) => {
+  try {
+    // Verificar permisos
+    if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'moderator')) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permisos para esta acción'
+      });
+    }
+
+    const { characterId } = req.params;
+    const updates = req.body;
+
+    const character = await Character.findById(characterId);
+    if (!character) {
+      return res.status(404).json({
+        success: false,
+        message: 'Personaje no encontrado'
+      });
+    }
+
+    // Actualizar campos básicos
+    if (updates.name) character.name = updates.name;
+    if (updates.class) character.class = updates.class;
+
+    // Actualizar stats
+    if (updates.stats) {
+      if (updates.stats.level !== undefined) character.stats.level = updates.stats.level;
+      if (updates.stats.experience !== undefined) character.stats.experience = updates.stats.experience;
+      if (updates.stats.gold !== undefined) character.stats.gold = updates.stats.gold;
+      if (updates.stats.hp !== undefined) character.stats.hp = updates.stats.hp;
+      if (updates.stats.maxHp !== undefined) character.stats.maxHp = updates.stats.maxHp;
+      if (updates.stats.mana !== undefined) character.stats.mana = updates.stats.mana;
+      if (updates.stats.maxMana !== undefined) character.stats.maxMana = updates.stats.maxMana;
+      if (updates.stats.stamina !== undefined) character.stats.stamina = updates.stats.stamina;
+      if (updates.stats.maxStamina !== undefined) character.stats.maxStamina = updates.stats.maxStamina;
+      if (updates.stats.strength !== undefined) character.stats.strength = updates.stats.strength;
+      if (updates.stats.dexterity !== undefined) character.stats.dexterity = updates.stats.dexterity;
+      if (updates.stats.intelligence !== undefined) character.stats.intelligence = updates.stats.intelligence;
+      if (updates.stats.constitution !== undefined) character.stats.constitution = updates.stats.constitution;
+    }
+
+    // Actualizar apariencia
+    if (updates.appearance) {
+      if (updates.appearance.body !== undefined) character.appearance.body = updates.appearance.body;
+      if (updates.appearance.head !== undefined) character.appearance.head = updates.appearance.head;
+      if (updates.appearance.race !== undefined) character.appearance.race = updates.appearance.race;
+    }
+
+    // Actualizar estado
+    if (updates.state) {
+      if (updates.state.isAlive !== undefined) {
+        character.state.isAlive = updates.state.isAlive;
+        // Si el personaje muere, poner HP en 0
+        if (!updates.state.isAlive) {
+          character.stats.hp = 0;
+        }
+      }
+    }
+
+    // Actualizar criminalidad
+    if (updates.criminalStatus !== undefined) {
+      character.criminalStatus = updates.criminalStatus;
+    }
+
+    await character.save();
+
+    // IMPORTANTE: Si el personaje está online, desconectarlo para que recargue con los nuevos datos
+    // Esto evita que los datos en memoria sobrescriban los cambios del admin
+    const { characterSockets, io } = await import('../server.js');
+    const socketId = characterSockets.get(characterId);
+    
+    if (socketId) {
+      console.log(`⚠️ Personaje ${character.name} estaba online - desconectando para aplicar cambios del admin...`);
+      
+      // Enviar notificación al cliente antes de desconectar
+      io.to(socketId).emit('admin_update', {
+        message: 'Tu personaje ha sido modificado por un administrador. Serás desconectado para aplicar los cambios.',
+        reason: 'admin_modification'
+      });
+      
+      // Dar tiempo para que el mensaje llegue, luego desconectar
+      setTimeout(() => {
+        const socket = io.sockets.sockets.get(socketId);
+        if (socket) {
+          socket.disconnect(true);
+          console.log(`✅ Jugador ${character.name} desconectado por modificación admin`);
+        }
+      }, 1000);
+    }
+
+    res.json({
+      success: true,
+      message: socketId 
+        ? 'Personaje actualizado exitosamente. El jugador será desconectado para aplicar los cambios.'
+        : 'Personaje actualizado exitosamente',
+      data: character,
+      wasOnline: !!socketId
+    });
+
+  } catch (error) {
+    console.error('Error al actualizar personaje:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al actualizar personaje'
+    });
+  }
+};
+
+/**
  * Obtener lista de NPCs activos (solo admin/moderator)
  * GET /api/admin/npcs
  */
+/**
+ * @desc    Regenerar instancias de NPCs (limpia y vuelve a spawnear todos)
+ * @route   POST /api/admin/npcs/regenerate
+ * @access  Private (Admin)
+ */
+export const regenerateNPCInstances = async (req, res) => {
+  try {
+    console.log('🔄 Iniciando regeneración de instancias de NPCs...');
+    
+    // Importar dinámicamente para evitar problemas de dependencias circulares
+    const NPCInstance = (await import('../models/NPCInstance.js')).default;
+    const NPC = (await import('../models/NPC.js')).default;
+    
+    // Limpiar todas las instancias
+    const deleteResult = await NPCInstance.deleteMany({});
+    console.log(`🧹 ${deleteResult.deletedCount} instancias eliminadas`);
+    
+    // Obtener tipos de NPCs activos
+    const npcTypes = await NPC.find({ isActive: true });
+    console.log(`📦 ${npcTypes.length} tipos de NPCs encontrados`);
+    
+    // El servidor respawneará automáticamente los NPCs cuando detecte que no hay instancias
+    // o puedes forzar el respawn reiniciando el servidor
+    
+    res.json({
+      success: true,
+      message: 'Instancias de NPCs eliminadas. Reinicia el servidor para respawnear.',
+      deleted: deleteResult.deletedCount,
+      npcTypes: npcTypes.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Error al regenerar instancias de NPCs:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al regenerar instancias de NPCs'
+    });
+  }
+};
+
 export const getActiveNPCs = async (req, res) => {
   try {
     // Verificar permisos
