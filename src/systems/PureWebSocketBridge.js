@@ -121,8 +121,11 @@ export class PureWebSocketBridge {
           return;
       }
 
-      // Todas las demás rutas requieren autenticación
-      if (!clientData.authenticated) {
+      // El chat NO requiere autenticación JWT (solo conexión WebSocket)
+      // Otros eventos sí requieren autenticación
+      const eventsWithoutAuth = ['chat_message', 'join_game', 'player_move'];
+      
+      if (!eventsWithoutAuth.includes(event) && !clientData.authenticated) {
         console.log(`🚫 [WS ${clientData.socketId}] → Rechazado: No autenticado`);
         this._send(ws, 'error', { message: 'No autenticado. Envía "authenticate" primero.' });
         return;
@@ -180,13 +183,17 @@ export class PureWebSocketBridge {
   _bridgeToSocketIO(event, data, clientData) {
     console.log(`🌉 [Bridge] Procesando evento '${event}' para bridgear a Socket.io`);
     
-    // Para eventos de chat, necesitamos obtener el jugador desde connectedPlayers
-    const player = this.connectedPlayers.get(clientData.socketId);
+    // Para eventos de chat, intentar obtener el jugador pero usar fallback si no existe
+    let player = this.connectedPlayers.get(clientData.socketId);
     
+    // Si no hay jugador en connectedPlayers, usar datos básicos del WebSocket
     if (!player) {
-      console.warn(`⚠️ [Bridge] Jugador no encontrado en connectedPlayers para ${clientData.socketId}`);
-      this._send(clientData.ws, 'error', { message: 'Jugador no encontrado. Debes hacer join_game primero.' });
-      return;
+      console.warn(`⚠️ [Bridge] Jugador no en connectedPlayers, usando datos básicos del WebSocket`);
+      player = {
+        socketId: clientData.socketId,
+        username: `Jugador-${clientData.socketId.substring(0, 8)}`,
+        map: 'default'
+      };
     }
     
     // Crear un objeto "socket" simulado para Socket.io
