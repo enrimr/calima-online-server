@@ -178,6 +178,17 @@ export class PureWebSocketBridge {
    * Hace de puente entre WebSocket puro y Socket.io
    */
   _bridgeToSocketIO(event, data, clientData) {
+    console.log(`🌉 [Bridge] Procesando evento '${event}' para bridgear a Socket.io`);
+    
+    // Para eventos de chat, necesitamos obtener el jugador desde connectedPlayers
+    const player = this.connectedPlayers.get(clientData.socketId);
+    
+    if (!player) {
+      console.warn(`⚠️ [Bridge] Jugador no encontrado en connectedPlayers para ${clientData.socketId}`);
+      this._send(clientData.ws, 'error', { message: 'Jugador no encontrado. Debes hacer join_game primero.' });
+      return;
+    }
+    
     // Crear un objeto "socket" simulado para Socket.io
     const fakeSocket = {
       id: clientData.socketId,
@@ -203,9 +214,32 @@ export class PureWebSocketBridge {
       }
     };
 
-    // Emitir evento en Socket.io
-    console.log(`🌉 [Bridge] Reenviando ${event} desde WS a Socket.io`);
-    this.io.emit(event, data); // TODO: Mejorar para eventos específicos
+    // Manejar eventos específicos correctamente
+    if (event === 'chat_message') {
+      console.log(`💬 [Bridge] Procesando mensaje de chat de ${player.username}: ${data.message?.substring(0, 50)}`);
+      
+      // Estructura del mensaje de chat con información del jugador
+      const chatMessage = {
+        socketId: clientData.socketId,
+        username: player.username,
+        message: data.message,
+        type: data.type || 'global',
+        timestamp: Date.now()
+      };
+      
+      // Broadcast a todos (Socket.io + WebSocket)
+      console.log(`📢 [Bridge] Broadcasting mensaje global: ${player.username}: ${data.message}`);
+      this.io.emit('chat_message', chatMessage);
+      
+      // También enviar a otros clientes WebSocket
+      this.broadcast('chat_message', chatMessage, clientData.socketId);
+      
+      console.log(`✅ [Bridge] Mensaje de chat bridgeado exitosamente`);
+    } else {
+      // Para otros eventos, usar lógica general
+      console.log(`🌉 [Bridge] Reenviando ${event} a Socket.io (genérico)`);
+      this.io.emit(event, data);
+    }
   }
 
   /**
