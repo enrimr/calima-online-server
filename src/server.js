@@ -25,9 +25,30 @@ validateConfig();
 connectDB();
 
 // Procesar CORS_ORIGIN (puede ser una URL o múltiples separadas por comas)
-const corsOrigins = process.env.CORS_ORIGIN 
+const corsOriginList = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
   : ['http://localhost:8080'];
+
+// Función de validación de origen CORS:
+// - Permite orígenes exactos definidos en CORS_ORIGIN
+// - Permite cualquier subdominio de *.enri.me (http y https)
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // Peticiones sin origin (curl, Postman, etc.)
+  if (corsOriginList.includes(origin)) return true;
+  if (/^https?:\/\/([a-z0-9-]+\.)*enri\.me(:\d+)?$/.test(origin)) return true;
+  return false;
+}
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS: origen no permitido → ${origin}`));
+    }
+  },
+  credentials: true
+};
 
 // Crear aplicación Express
 const app = express();
@@ -36,7 +57,13 @@ const httpServer = createServer(app);
 // Configurar Socket.io
 const io = new Server(httpServer, {
   cors: {
-    origin: corsOrigins,
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origen no permitido → ${origin}`));
+      }
+    },
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -48,10 +75,7 @@ const io = new Server(httpServer, {
 app.use(helmet());
 
 // CORS
-app.use(cors({
-  origin: corsOrigins,
-  credentials: true
-}));
+app.use(cors(corsOptions));
 
 // Rate limiting
 const limiter = rateLimit({
