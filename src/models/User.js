@@ -121,10 +121,12 @@ userSchema.methods.isBannedCheck = function() {
   return true;
 };
 
-// Método para actualizar último login
-userSchema.methods.updateLastLogin = function() {
-  this.lastLogin = new Date();
-  return this.save();
+// Método para actualizar último login sin validar todo el documento
+userSchema.methods.updateLastLogin = async function() {
+  return await User.updateOne(
+    { _id: this._id },
+    { $set: { lastLogin: new Date() } }
+  );
 };
 
 const User = mongoose.model('User', userSchema);
