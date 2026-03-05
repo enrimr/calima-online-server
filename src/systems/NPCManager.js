@@ -1004,7 +1004,8 @@ class NPCManager {
    */
   async updatePlayerRewards(playerId, experience, gold) {
     try {
-      const player = this.connectedPlayers.get(playerId);
+      // Usar this.getPlayer() que está asignado desde server.js con connectedPlayers
+      const player = this.getPlayer(playerId);
       
       if (!player) {
         console.error(`❌ No se pudo encontrar jugador con ID: ${playerId}`);
@@ -1067,9 +1068,8 @@ class NPCManager {
         });
         console.log(`  ✅ Evento level_up enviado\n`);
 
-        // Actualizar el jugador conectado con los nuevos stats
+        // Actualizar el nivel en connectedPlayers (ya tenemos la referencia del objeto, basta con mutarlo)
         player.level = result.currentLevel;
-        this.connectedPlayers.set(playerId, player);
       }
 
       // Siempre enviar actualización de stats (incluso sin level up)
