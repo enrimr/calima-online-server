@@ -7,8 +7,94 @@ import NPCInstance from '../models/NPCInstance.js';
 import NPC from '../models/NPC.js';
 import Character from '../models/Character.js';
 
+// Definición de los tipos de NPC del juego
+const NPC_TYPES_DATA = [
+  {
+    npcTypeId: 1,
+    name: 'Goblin',
+    description: 'Un pequeño y malicioso goblin',
+    type: 'enemy',
+    appearance: { body: 301, head: 0, heading: 3 },
+    stats: { level: 1, hp: 50, maxHp: 50, minHit: 3, maxHit: 8, defense: 2, magicDefense: 0, evasion: 5 },
+    behavior: { hostile: true, attackable: true, movement: 'random', movementSpeed: 3000, attackRange: 1, chaseRange: 8, canSwim: false, canWalkOnLand: true },
+    rewards: { experience: 50, gold: 10, items: [] },
+    spawnConfig: {
+      respawnTime: 15000, maxInstances: 20,
+      spawnMaps: [
+        { mapId: 'newbie_city', spawnPoints: [{ x: 15, y: 15 }, { x: 25, y: 20 }, { x: 35, y: 25 }, { x: 20, y: 35 }, { x: 40, y: 30 }], maxInMap: 5 },
+        { mapId: 'training_fields', spawnPoints: [{ x: 12, y: 15 }, { x: 20, y: 12 }, { x: 30, y: 18 }, { x: 25, y: 25 }], maxInMap: 4 },
+        { mapId: 'forest_outskirts_1', spawnPoints: [{ x: 15, y: 20 }, { x: 35, y: 15 }, { x: 25, y: 30 }], maxInMap: 3 }
+      ]
+    },
+    abilities: { canPoison: false, poisonDamage: 0, canParalyze: false, spells: [] },
+    sounds: { idle: 0, attack: 0, death: 0 },
+    isActive: true
+  },
+  {
+    npcTypeId: 2,
+    name: 'Araña Gigante',
+    description: 'Una araña venenosa de gran tamaño',
+    type: 'enemy',
+    appearance: { body: 302, head: 0, heading: 3 },
+    stats: { level: 3, hp: 80, maxHp: 80, minHit: 5, maxHit: 12, defense: 3, magicDefense: 0, evasion: 8 },
+    behavior: { hostile: true, attackable: true, movement: 'chase', movementSpeed: 2500, attackRange: 1, chaseRange: 10, canSwim: false, canWalkOnLand: true },
+    rewards: { experience: 120, gold: 25, items: [] },
+    spawnConfig: {
+      respawnTime: 20000, maxInstances: 15,
+      spawnMaps: [
+        { mapId: 'newbie_city', spawnPoints: [{ x: 18, y: 18 }, { x: 45, y: 20 }, { x: 30, y: 40 }], maxInMap: 3 },
+        { mapId: 'training_fields', spawnPoints: [{ x: 15, y: 25 }, { x: 40, y: 20 }, { x: 35, y: 35 }], maxInMap: 3 },
+        { mapId: 'forest_outskirts_1', spawnPoints: [{ x: 20, y: 25 }, { x: 40, y: 30 }], maxInMap: 2 }
+      ]
+    },
+    abilities: { canPoison: true, poisonDamage: 5, canParalyze: false, spells: [] },
+    sounds: { idle: 0, attack: 0, death: 0 },
+    isActive: true
+  },
+  {
+    npcTypeId: 3,
+    name: 'Lobo Salvaje',
+    description: 'Un lobo feroz que caza en manada',
+    type: 'enemy',
+    appearance: { body: 303, head: 0, heading: 3 },
+    stats: { level: 2, hp: 60, maxHp: 60, minHit: 4, maxHit: 10, defense: 2, magicDefense: 0, evasion: 10 },
+    behavior: { hostile: true, attackable: true, movement: 'chase', movementSpeed: 2000, attackRange: 1, chaseRange: 12, canSwim: false, canWalkOnLand: true },
+    rewards: { experience: 80, gold: 15, items: [] },
+    spawnConfig: {
+      respawnTime: 18000, maxInstances: 18,
+      spawnMaps: [
+        { mapId: 'newbie_city', spawnPoints: [{ x: 22, y: 22 }, { x: 38, y: 28 }, { x: 28, y: 45 }, { x: 42, y: 35 }], maxInMap: 4 },
+        { mapId: 'training_fields', spawnPoints: [{ x: 18, y: 22 }, { x: 32, y: 28 }, { x: 45, y: 25 }, { x: 38, y: 18 }], maxInMap: 4 },
+        { mapId: 'forest_outskirts_1', spawnPoints: [{ x: 25, y: 18 }, { x: 35, y: 22 }, { x: 42, y: 28 }], maxInMap: 3 }
+      ]
+    },
+    abilities: { canPoison: false, poisonDamage: 0, canParalyze: false, spells: [] },
+    sounds: { idle: 0, attack: 0, death: 0 },
+    isActive: true
+  },
+  {
+    npcTypeId: 100,
+    name: 'Sacerdote',
+    description: 'Un sacerdote que puede resucitar a los muertos',
+    type: 'priest',
+    appearance: { body: 200, head: 1, heading: 3 },
+    stats: { level: 10, hp: 200, maxHp: 200, minHit: 0, maxHit: 0, defense: 10, magicDefense: 10, evasion: 0 },
+    behavior: { hostile: false, attackable: false, movement: 'static', movementSpeed: 0, attackRange: 0, chaseRange: 0, canSwim: false, canWalkOnLand: true },
+    rewards: { experience: 0, gold: 0, items: [] },
+    spawnConfig: {
+      respawnTime: 0, maxInstances: 1,
+      spawnMaps: [
+        { mapId: 'newbie_city', spawnPoints: [{ x: 50, y: 50 }], maxInMap: 1 }
+      ]
+    },
+    abilities: { canPoison: false, poisonDamage: 0, canParalyze: false, spells: [] },
+    sounds: { idle: 0, attack: 0, death: 0 },
+    isActive: true
+  }
+];
+
 /**
- * @desc    Spawnear NPCs de todos los tipos activos
+ * @desc    Inicializar tipos de NPC en la base de datos (seed) y luego spawnear instancias
  * @route   POST /api/admin/maintenance/seed-npcs
  * @access  Admin only
  */
@@ -23,11 +109,15 @@ export const seedNPCs = async (req, res) => {
       });
     }
 
-    const currentCount = await NPCInstance.countDocuments();
-    const npcTypes = await NPC.find({ isActive: true });
+    // Paso 1: Limpiar e insertar tipos de NPC en la BD
+    await NPC.deleteMany({});
+    const insertedTypes = await NPC.insertMany(NPC_TYPES_DATA);
+    console.log(`✅ ${insertedTypes.length} tipos de NPC insertados en BD`);
 
+    // Paso 2: Spawnear instancias de cada tipo
+    const currentInstanceCount = await NPCInstance.countDocuments();
     let spawned = 0;
-    for (const npcType of npcTypes) {
+    for (const npcType of insertedTypes) {
       try {
         await npcManager.spawnNPCsByType(npcType);
         spawned++;
@@ -36,23 +126,23 @@ export const seedNPCs = async (req, res) => {
       }
     }
 
-    const newCount = await NPCInstance.countDocuments();
+    const newInstanceCount = await NPCInstance.countDocuments();
 
     res.json({
       success: true,
-      message: `NPCs spawneados exitosamente`,
+      message: `Tipos insertados y NPCs spawneados exitosamente`,
       data: {
-        previousCount: currentCount,
-        newCount: newCount,
-        typesProcessed: spawned,
-        npcTypes: npcTypes.length
+        typesInserted: insertedTypes.length,
+        previousInstances: currentInstanceCount,
+        newInstances: newInstanceCount,
+        typesSpawned: spawned
       }
     });
   } catch (error) {
     console.error('Error en seedNPCs:', error);
     res.status(500).json({
       success: false,
-      message: 'Error al spawnear NPCs',
+      message: 'Error al seedear NPCs',
       error: error.message
     });
   }
