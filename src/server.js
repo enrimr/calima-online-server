@@ -92,9 +92,11 @@ app.use(express.urlencoded({ extended: true }));
 
 // Rutas API
 import adminRoutes from './routes/adminRoutes.js';
+import maintenanceRoutes from './routes/maintenanceRoutes.js';
 app.use('/api/auth', authRoutes);
 app.use('/api/characters', characterRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/maintenance', maintenanceRoutes);
 
 // Ruta de salud
 app.get('/health', (req, res) => {
@@ -182,6 +184,9 @@ setTimeout(async () => {
     // Inicializar NPCManager
     await npcManager.initialize();
     console.log('✅ NPCManager inicializado correctamente');
+    
+    // Hacer NPCManager disponible globalmente para controllers
+    app.locals.npcManager = npcManager;
   } catch (error) {
     console.error('❌ Error al inicializar sistemas:', error);
   }
