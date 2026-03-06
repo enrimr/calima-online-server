@@ -7,6 +7,12 @@ import NPCInstance from '../models/NPCInstance.js';
 import NPC from '../models/NPC.js';
 import Character from '../models/Character.js';
 
+// Tiempo de respawn por defecto en ms (configurable via variable de entorno)
+// NPC_RESPAWN_TIME_MS=30000 (por defecto: 30 segundos)
+const DEFAULT_RESPAWN_TIME = parseInt(process.env.NPC_RESPAWN_TIME_MS) || 30000;
+
+console.log(`⏰ NPC respawn time: ${DEFAULT_RESPAWN_TIME / 1000}s (configurable via NPC_RESPAWN_TIME_MS)`);
+
 // Definición de los tipos de NPC del juego
 const NPC_TYPES_DATA = [
   {
@@ -19,7 +25,7 @@ const NPC_TYPES_DATA = [
     behavior: { hostile: true, attackable: true, movement: 'random', movementSpeed: 3000, attackRange: 1, chaseRange: 8, canSwim: false, canWalkOnLand: true },
     rewards: { experience: 50, gold: 10, items: [] },
     spawnConfig: {
-      respawnTime: 15000, maxInstances: 20,
+      respawnTime: DEFAULT_RESPAWN_TIME, maxInstances: 20,
       spawnMaps: [
         { mapId: 'newbie_city', spawnPoints: [{ x: 15, y: 15 }, { x: 25, y: 20 }, { x: 35, y: 25 }, { x: 20, y: 35 }, { x: 40, y: 30 }], maxInMap: 5 },
         { mapId: 'training_fields', spawnPoints: [{ x: 12, y: 15 }, { x: 20, y: 12 }, { x: 30, y: 18 }, { x: 25, y: 25 }], maxInMap: 4 },
@@ -40,7 +46,7 @@ const NPC_TYPES_DATA = [
     behavior: { hostile: true, attackable: true, movement: 'chase', movementSpeed: 2500, attackRange: 1, chaseRange: 10, canSwim: false, canWalkOnLand: true },
     rewards: { experience: 120, gold: 25, items: [] },
     spawnConfig: {
-      respawnTime: 20000, maxInstances: 15,
+      respawnTime: DEFAULT_RESPAWN_TIME, maxInstances: 15,
       spawnMaps: [
         { mapId: 'newbie_city', spawnPoints: [{ x: 18, y: 18 }, { x: 45, y: 20 }, { x: 30, y: 40 }], maxInMap: 3 },
         { mapId: 'training_fields', spawnPoints: [{ x: 15, y: 25 }, { x: 40, y: 20 }, { x: 35, y: 35 }], maxInMap: 3 },
@@ -61,7 +67,7 @@ const NPC_TYPES_DATA = [
     behavior: { hostile: true, attackable: true, movement: 'chase', movementSpeed: 2000, attackRange: 1, chaseRange: 12, canSwim: false, canWalkOnLand: true },
     rewards: { experience: 80, gold: 15, items: [] },
     spawnConfig: {
-      respawnTime: 18000, maxInstances: 18,
+      respawnTime: DEFAULT_RESPAWN_TIME, maxInstances: 18,
       spawnMaps: [
         { mapId: 'newbie_city', spawnPoints: [{ x: 22, y: 22 }, { x: 38, y: 28 }, { x: 28, y: 45 }, { x: 42, y: 35 }], maxInMap: 4 },
         { mapId: 'training_fields', spawnPoints: [{ x: 18, y: 22 }, { x: 32, y: 28 }, { x: 45, y: 25 }, { x: 38, y: 18 }], maxInMap: 4 },
